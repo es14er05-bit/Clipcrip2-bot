@@ -1,0 +1,44 @@
+name: ClipCrip2 Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * *"
+
+jobs:
+  clips-holen:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Abhängigkeiten installieren
+        run: pip install requests yt-dlp
+
+      - name: Top-Clips von Jussef finden
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+        run: python scripts/get_clips.py
+
+      - name: Gefundene Clips anzeigen
+        run: |
+          echo "===== clips_today.json ====="
+          cat clips_today.json
+          echo "============================"
+
+      - name: Clips herunterladen
+        run: python scripts/download_clips.py
+
+      - name: Fertige MP4-Clips speichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: jussef-clips
+          path: downloaded_clips/
+          if-no-files-found: error
