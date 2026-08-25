@@ -2,22 +2,28 @@ import json
 import os
 import subprocess
 import sys
+import glob
 
 INPUT_FILE = "clips_today.json"
 OUTPUT_DIR = "downloaded_clips"
 
 
 def download_clip(url, output):
-
-    print(
-        f"Downloading: {url}"
-    )
+    print(f"Downloading: {url}")
 
     result = subprocess.run([
         sys.executable,
         "-m",
         "yt_dlp",
         "--no-playlist",
+        "--retries",
+        "3",
+        "--fragment-retries",
+        "3",
+        "--concurrent-fragments",
+        "4",
+        "-f",
+        "bestvideo+bestaudio/best",
         "--merge-output-format",
         "mp4",
         "-o",
@@ -26,7 +32,6 @@ def download_clip(url, output):
     ])
 
     if result.returncode != 0:
-
         raise RuntimeError(
             f"Download fehlgeschlagen: {url}"
         )
@@ -39,10 +44,14 @@ def main():
         exist_ok=True
     )
 
-    if not os.path.exists(
-        INPUT_FILE
+    # Alte Downloads löschen
+    for file in glob.glob(
+        os.path.join(OUTPUT_DIR, "*")
     ):
+        if os.path.isfile(file):
+            os.remove(file)
 
+    if not os.path.exists(INPUT_FILE):
         raise FileNotFoundError(
             f"{INPUT_FILE} wurde nicht gefunden."
         )
@@ -52,72 +61,71 @@ def main():
         "r",
         encoding="utf-8"
     ) as file:
-
         clips = json.load(file)
 
     if not clips:
-
         raise RuntimeError(
             "clips_today.json ist leer."
         )
 
     print(
-        f"{len(clips)} Kandidaten zum "
-        "Herunterladen gefunden."
+        f"{len(clips)} Kandidaten werden "
+        "heruntergeladen."
     )
 
-    # Alte Dateien entfernen
-    for filename in os.listdir(
-        OUTPUT_DIR
-    ):
-
-        path = os.path.join(
-            OUTPUT_DIR,
-            filename
-        )
-
-        if os.path.isfile(path):
-            os.remove(path)
+    successful = 0
 
     for number, clip in enumerate(
         clips,
         start=1
     ):
 
-        clip_url = clip["url"]
+        clip_url = clip.get("url")
+
+        if not clip_url:
+            print(
+                f"Clip {number} hat keine URL."
+            )
+            continue
 
         output = os.path.join(
             OUTPUT_DIR,
-            f"candidate_{number:02d}.%(ext)s"
+            f"clip_{number}.%(ext)s"
         )
 
         print("")
         print(
-            f"Kandidat "
-            f"{number}/{len(clips)}"
+            f"===== DOWNLOAD {number}/"
+            f"{len(clips)} ====="
         )
 
-        print(
-            clip.get(
-                "title",
-                ""
+        try:
+
+            download_clip(
+                clip_url,
+                output
             )
-        )
 
-        download_clip(
-            clip_url,
-            output
+            successful += 1
+
+        except Exception as error:
+
+            print(
+                f"DOWNLOAD FEHLER: {error}"
+            )
+
+    if successful == 0:
+
+        raise RuntimeError(
+            "Keiner der Clips konnte "
+            "heruntergeladen werden."
         )
 
     print("")
     print(
-        "================================"
-    )
-    print(
-        "ALLE KANDIDATEN HERUNTERGELADEN"
-    )
-    print(
-        "================================"
+        f"{successful} von "
+        f"{len(clips)} Clips erfolgreich "
+        "heruntergeladen."
     )
 
 
