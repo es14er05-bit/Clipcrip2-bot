@@ -8,12 +8,11 @@ CLIENT_SECRET = os.environ["TWITCH_CLIENT_SECRET"]
 
 BROADCASTER_LOGIN = "jussef"
 
-ANZAHL_FINAL = 5
-ANZAHL_KANDIDATEN = 20
-SUCHZEITRAUM_TAGE = 30
+# Wir holen deutlich mehr Kandidaten.
+KANDIDATEN_ANZAHL = 40
 
+SUCHZEITRAUM_TAGE = 30
 USED_FILE = "used_clips.json"
-HISTORY_FILE = "clip_history.json"
 
 
 def get_token():
@@ -71,15 +70,18 @@ def get_clips(token, broadcaster_id):
         now - datetime.timedelta(days=SUCHZEITRAUM_TAGE)
     ).isoformat().replace("+00:00", "Z")
 
-    clips = []
+    until = now.isoformat().replace("+00:00", "Z")
+
+    all_clips = []
     cursor = None
 
-    for _ in range(10):
+    # Mehrere Seiten abrufen.
+    for page in range(10):
 
         params = {
             "broadcaster_id": broadcaster_id,
             "started_at": since,
-            "ended_at": now.isoformat().replace("+00:00", "Z"),
+            "ended_at": until,
             "first": 100,
         }
 
@@ -97,8 +99,13 @@ def get_clips(token, broadcaster_id):
 
         result = response.json()
 
-        clips.extend(
-            result.get("data", [])
+        clips = result.get("data", [])
+
+        all_clips.extend(clips)
+
+        print(
+            f"Twitch-Seite {page + 1}: "
+            f"{len(clips)} Clips"
         )
 
         cursor = (
@@ -110,7 +117,7 @@ def get_clips(token, broadcaster_id):
         if not cursor:
             break
 
-    return clips
+    return all_clips
 
 
 def load_used():
@@ -121,107 +128,97 @@ def load_used():
         with open(
             USED_FILE,
             "r",
-            encoding="utf-8"
+            encoding="utf-8",
         ) as file:
-            return set(json.load(file))
+            data = json.load(file)
+
+        if not isinstance(data, list):
+            return set()
+
+        return set(data)
 
     except Exception:
         return set()
 
 
-def load_history():
-    if not os.path.exists(HISTORY_FILE):
-        return {}
+def calculate_candidate_score(clip):
+    """
+    Nur eine VORauswahl.
+    Die eigentliche Qualitätskontrolle passiert später.
+    """
 
-    try:
-        with open(
-            HISTORY_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-            return json.load(file)
-
-    except Exception:
-        return {}
-
-
-def score_clip(clip):
+    score = 0.0
 
     views = int(
         clip.get(
             "view_count",
-            0
+            0,
         )
     )
 
     duration = float(
         clip.get(
             "duration",
-            0
+            0,
         )
     )
 
-    score = 0
+    # Views sind nur ein Signal.
+    score += min(views / 500.0, 30.0)
 
-    # Views
-    score += min(
-        views,
-        100000
-    )
+    # Sinnvolle Clip-Längen bevorzugen.
+    if 10 <= duration <= 45:
+        score += 15
 
-    # Gute TikTok-Länge
-    if 12 <= duration <= 45:
-        score += 30000
-
-    elif 8 <= duration < 12:
-        score += 5000
+    elif 8 <= duration < 10:
+        score += 3
 
     elif 45 < duration <= 60:
-        score += 10000
+        score += 8
 
-    elif duration > 60:
-        score -= 15000
+    elif duration > 90:
+        score -= 10
 
+    # Titel nur als sehr kleines Signal.
     title = str(
         clip.get(
             "title",
-            ""
+            "",
         )
     ).lower()
 
-    interesting_words = [
+    keywords = [
         "lol",
         "haha",
         "wtf",
         "crazy",
-        "lustig",
-        "lachen",
-        "eskaliert",
-        "reaktion",
-        "reagiert",
         "rage",
         "fail",
-        "geil",
+        "eskaliert",
+        "lustig",
+        "lachen",
         "bruder",
+        "reaktion",
         "chat",
-        "was",
-        "warum",
     ]
 
-    for word in interesting_words:
-        if word in title:
-            score += 5000
+    for keyword in keywords:
+        if keyword in title:
+            score += 2
 
     return score
 
 
 def main():
-
     print("================================")
-    print("ClipCrip2 – 20 Kandidaten")
+    print("CLIPCRIP2 – KANDIDATENSUCHE")
     print("================================")
 
     token = get_token()
+
+    print(
+        f"Streamer: {BROADCASTER_LOGIN}"
+    )
 
     broadcaster_id = get_broadcaster_id(
         token
@@ -234,11 +231,12 @@ def main():
 
     clips = get_clips(
         token,
-        broadcaster_id
+        broadcaster_id,
     )
 
     print(
-        f"{len(clips)} Clips gefunden."
+        f"Insgesamt gefunden: "
+        f"{len(clips)}"
     )
 
     used = load_used()
@@ -247,101 +245,102 @@ def main():
 
     for clip in clips:
 
-        clip_id = clip["id"]
+        clip_id = clip.get("id")
+
+        if not clip_id:
+            continue
+
+        # Bereits endgültig verwendete Clips NICHT wieder nehmen.
+        if clip_id in used:
+            continue
 
         duration = float(
             clip.get(
                 "duration",
-                0
+                0,
             )
         )
 
-        views = int(
-            clip.get(
-                "view_count",
-                0
-            )
-        )
-
-        # Exakt bereits verwendete Clips niemals erneut.
-        if clip_id in used:
-            continue
-
-        # Zu kurze Clips raus.
+        # Extrem kurze Clips raus.
         if duration < 8:
             continue
 
-        # Clips ohne Views raus.
-        if views <= 0:
-            continue
+        # Sehr lange Clips nicht komplett ausschließen,
+        # aber deutlich nach hinten sortieren.
+        score = calculate_candidate_score(
+            clip
+        )
 
-        candidates.append({
-            "id": clip_id,
-            "title": clip.get(
-                "title",
-                ""
-            ),
-            "url": clip["url"],
-            "view_count": views,
-            "duration": duration,
-            "creator_name": clip.get(
-                "creator_name",
-                ""
-            ),
-            "created_at": clip.get(
-                "created_at",
-                ""
-            ),
-            "thumbnail_url": clip.get(
-                "thumbnail_url",
-                ""
-            ),
-            "score": score_clip(
-                clip
-            ),
-        })
+        candidates.append(
+            {
+                "id": clip_id,
+                "title": clip.get(
+                    "title",
+                    "",
+                ),
+                "url": clip.get(
+                    "url",
+                    "",
+                ),
+                "view_count": int(
+                    clip.get(
+                        "view_count",
+                        0,
+                    )
+                ),
+                "duration": duration,
+                "creator_name": clip.get(
+                    "creator_name",
+                    "",
+                ),
+                "created_at": clip.get(
+                    "created_at",
+                    "",
+                ),
+                "thumbnail_url": clip.get(
+                    "thumbnail_url",
+                    "",
+                ),
+                "candidate_score": score,
+            }
+        )
 
     candidates.sort(
-        key=lambda x: x["score"],
-        reverse=True
+        key=lambda x: x["candidate_score"],
+        reverse=True,
     )
 
-    candidates = candidates[
-        :ANZAHL_KANDIDATEN
+    # 40 Kandidaten an Download/QC weitergeben.
+    selected_candidates = candidates[
+        :KANDIDATEN_ANZAHL
     ]
-
-    if len(candidates) < ANZAHL_KANDIDATEN:
-        raise RuntimeError(
-            f"Nur {len(candidates)} neue "
-            f"Kandidaten gefunden. "
-            f"Benötigt werden {ANZAHL_KANDIDATEN}."
-        )
 
     with open(
         "clips_today.json",
         "w",
-        encoding="utf-8"
+        encoding="utf-8",
     ) as file:
-
         json.dump(
-            candidates,
+            selected_candidates,
             file,
             indent=2,
-            ensure_ascii=False
+            ensure_ascii=False,
         )
 
     print("")
+    print("================================")
     print(
-        f"{len(candidates)} Kandidaten ausgewählt."
+        f"{len(selected_candidates)} "
+        "KANDIDATEN AUSGEWÄHLT"
     )
+    print("================================")
 
-    for i, clip in enumerate(
-        candidates,
-        start=1
+    for number, clip in enumerate(
+        selected_candidates,
+        start=1,
     ):
-
         print(
-            f"{i:02d}. "
+            f"{number:02d}. "
             f"{clip['title']} | "
             f"{clip['view_count']} Views | "
             f"{clip['duration']:.1f}s"
@@ -350,7 +349,11 @@ def main():
     print("")
     print(
         "WICHTIG: Kandidaten werden "
-        "noch NICHT als benutzt markiert."
+        "NOCH NICHT als benutzt markiert."
+    )
+    print(
+        "Das passiert erst nach erfolgreicher "
+        "Qualitätskontrolle."
     )
 
 
