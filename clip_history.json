@@ -12023,5 +12023,112 @@
     "title": "5 Sterne Streamer",
     "created_at": "2026-08-07T18:58:14Z",
     "score": 80.014
+  },
+  "AnnoyingOptimisticOxSoBayed-9TQYm3tv3F6ZooPH": {
+    "title": "kk",
+    "created_at": "2026-07-31T20:42:54Z",
+    "duration": 47.6,
+    "quality_score": 126.27138055504842,
+    "quality_details": {
+      "duration": 47.646677777777775,
+      "motion": 43.408334490740735,
+      "action": 48.21688804626466,
+      "scene_change": 56.272847222222225,
+      "sharpness": 800.4802306850622,
+      "person_presence": 0.9375,
+      "person_size": 1.0,
+      "person_center": 0.9669172990322112,
+      "person_action": 1.0,
+      "visibility": 0.9468095951068953,
+      "audio": 1.0,
+      "metadata": 0.0204,
+      "reasons": []
+    }
+  },
+  "GeniusFancyQuailRalpherZ-A4yPY4MbVii2tRO7": {
+    "title": "yavuz",
+    "created_at": "2026-07-31T19:18:46Z",
+    "duration": 59.9,
+    "quality_score": 121.65347020621648,
+    "quality_details": {
+      "duration": 59.97658333333334,
+      "motion": 26.933546296296296,
+      "action": 26.96534118652344,
+      "scene_change": 33.66215277777778,
+      "sharpness": 1128.8623970884987,
+      "person_presence": 1.0,
+      "person_size": 0.75,
+      "person_center": 0.7593276631832124,
+      "person_action": 1.0,
+      "visibility": 0.7580880283896525,
+      "audio": 1.0,
+      "metadata": 0.0328,
+      "reasons": []
+    }
+  },
+  "CarefulTameGnatFeelsBadMan-UEnmDR-nsCP1B5GT": {
+    "title": "er macht 50k im monat und will für essen nicht 25€ zahlen",
+    "created_at": "2026-07-31T21:36:35Z",
+    "duration": 59.9,
+    "quality_score": 118.17812027621828,
+    "quality_details": {
+      "duration": 60.00995,
+      "motion": 16.02477314814815,
+      "action": 14.623981428146363,
+      "scene_change": 19.176736111111115,
+      "sharpness": 753.8084335127274,
+      "person_presence": 1.0,
+      "person_size": 1.0,
+      "person_center": 0.9119753298163414,
+      "person_action": 1.0,
+      "visibility": 0.9597835371650281,
+      "audio": 1.0,
+      "metadata": 0.028,
+      "reasons": []
+    }
+  },
+  "CloudyArtisticCasetteTooSpicy-rQwHiYAc1s3JznjE": {
+    "title": "kafa",
+    "created_at": "2026-07-30T22:01:09Z",
+    "duration": 59.9,
+    "quality_score": 114.18792974378157,
+    "quality_details": {
+      "duration": 60.043,
+      "motion": 63.24306365740741,
+      "action": 56.266099548339845,
+      "scene_change": 68.17018055555556,
+      "sharpness": 526.6608054809774,
+      "person_presence": 1.0,
+      "person_size": 0.75,
+      "person_center": 0.71968491345644,
+      "person_action": 1.0,
+      "visibility": 0.9802275328803645,
+      "audio": 1.0,
+      "metadata": 0.028,
+      "reasons": []
+    }
+  },
+  "TawdryObliqueCourgetteUWot-AfpUDme6yhv3PN2W": {
+    "title": "leak song",
+    "created_at": "2026-07-30T20:02:13Z",
+    "duration": 52.6,
+    "quality_score": 101.00744178254655,
+    "quality_details": {
+      "duration": 52.619233333333334,
+      "motion": 15.683415509259259,
+      "action": 24.556629037857057,
+      "scene_change": 13.939819444444447,
+      "sharpness": 777.734808823097,
+      "person_presence": 0.9375,
+      "person_size": 0.75,
+      "person_center": 0.8990401191711428,
+      "person_action": 0.8889062077542846,
+      "visibility": 0.1987189256856768,
+      "audio": 1.0,
+      "metadata": 0.0372,
+      "reasons": [
+        "schlechte Sichtbarkeit"
+      ]
+    }
   }
 }
