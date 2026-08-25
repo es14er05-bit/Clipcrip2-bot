@@ -49,7 +49,7 @@ jobs:
           path: tiktok_ready/
           if-no-files-found: error
 
-      - name: Benutzte Clips dauerhaft speichern
+            - name: Benutzte Clips dauerhaft speichern
         run: |
           git config user.name "ClipCrip2 Bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -58,7 +58,11 @@ jobs:
 
           if git diff --cached --quiet; then
             echo "Keine Änderungen an used_clips.json."
-          else
-            git commit -m "Update used Twitch clips"
-            git push
+            exit 0
           fi
+
+          git commit -m "Update used Twitch clips"
+
+          git pull --rebase origin main
+
+          git push origin main
