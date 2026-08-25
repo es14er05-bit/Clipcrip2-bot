@@ -2,6 +2,7 @@ import os
 import json
 import datetime
 import requests
+import hashlib
 
 CLIENT_ID = os.environ["TWITCH_CLIENT_ID"]
 CLIENT_SECRET = os.environ["TWITCH_CLIENT_SECRET"]
@@ -10,7 +11,9 @@ BROADCASTER_LOGIN = "jussef"
 
 ANZAHL_CLIPS = 5
 SUCHZEITRAUM_TAGE = 30
+
 USED_FILE = "used_clips.json"
+HISTORY_FILE = "clip_history.json"
 
 
 def get_token():
@@ -47,13 +50,13 @@ def get_broadcaster_id(token):
 
     if not data:
         raise RuntimeError(
-            f"Twitch-User '{BROADCASTER_LOGIN}' nicht gefunden."
+            f"Twitch-User '{BROADCASTER_LOGIN}' wurde nicht gefunden."
         )
 
     return data[0]["id"]
 
 
-def get_all_clips(token, broadcaster_id):
+def get_clips(token, broadcaster_id):
     headers = {
         "Client-Id": CLIENT_ID,
         "Authorization": f"Bearer {token}",
@@ -61,21 +64,20 @@ def get_all_clips(token, broadcaster_id):
 
     now = datetime.datetime.now(datetime.timezone.utc)
 
-    started_at = (
+    since = (
         now - datetime.timedelta(days=SUCHZEITRAUM_TAGE)
     ).isoformat().replace("+00:00", "Z")
-
-    ended_at = now.isoformat().replace("+00:00", "Z")
 
     clips = []
     cursor = None
 
+    # Mehrere Seiten abrufen.
+    # Dadurch sind wir nicht auf die ersten 100 Clips beschränkt.
     for _ in range(10):
-
         params = {
             "broadcaster_id": broadcaster_id,
-            "started_at": started_at,
-            "ended_at": ended_at,
+            "started_at": since,
+            "ended_at": now.isoformat().replace("+00:00", "Z"),
             "first": 100,
         }
 
@@ -103,86 +105,170 @@ def get_all_clips(token, broadcaster_id):
     return clips
 
 
-def load_used():
-    if not os.path.exists(USED_FILE):
-        return set()
+def load_json(filename, default):
+    if not os.path.exists(filename):
+        return default
 
     try:
-        with open(USED_FILE, "r", encoding="utf-8") as file:
-            return set(json.load(file))
-    except Exception:
-        return set()
+        with open(filename, "r", encoding="utf-8") as file:
+            data = json.load(file)
+
+        return data
+
+    except (json.JSONDecodeError, OSError):
+        return default
 
 
-def save_used(used):
-    with open(USED_FILE, "w", encoding="utf-8") as file:
+def save_json(filename, data):
+    with open(filename, "w", encoding="utf-8") as file:
         json.dump(
-            sorted(used),
+            data,
             file,
             indent=2,
             ensure_ascii=False,
         )
 
 
-def score_clip(clip):
-    views = int(clip.get("view_count", 0))
-    duration = float(clip.get("duration", 0))
+def make_content_key(clip):
+    """
+    Erstellt einen zusätzlichen Schlüssel aus dem
+    eigentlichen Clip-Inhalt/Metadaten.
 
-    score = 0
+    Die Twitch-ID bleibt der wichtigste Schutz gegen
+    exakte Wiederholungen.
+    """
 
-    # Popularität
+    title = str(
+        clip.get("title", "")
+    ).strip().lower()
+
+    creator = str(
+        clip.get("creator_name", "")
+    ).strip().lower()
+
+    created = str(
+        clip.get("created_at", "")
+    )
+
+    duration = round(
+        float(
+            clip.get("duration", 0)
+        ),
+        1,
+    )
+
+    raw = (
+        f"{title}|"
+        f"{creator}|"
+        f"{created}|"
+        f"{duration}"
+    )
+
+    return hashlib.sha1(
+        raw.encode("utf-8")
+    ).hexdigest()
+
+
+def clip_score(clip):
+    views = int(
+        clip.get("view_count", 0)
+    )
+
+    duration = float(
+        clip.get("duration", 0)
+    )
+
+    score = 0.0
+
+    # Views sind ein gutes Signal,
+    # aber nicht das einzige.
     score += min(views, 100000) * 1.0
 
-    # Gute TikTok-Länge bevorzugen
-    if 12 <= duration <= 45:
-        score += 3000
-
-    elif 8 <= duration < 12:
-        score += 500
-
-    elif 45 < duration <= 60:
-        score += 1000
-
-    elif duration > 60:
-        score -= 5000
-
-    # Extrem kurze Clips vermeiden
+    # Zu kurze Clips sind meistens schlechter.
     if duration < 8:
-        score -= 10000
+        score -= 50000
+
+    # Gute TikTok-Länge bevorzugen.
+    if 12 <= duration <= 45:
+        score += 25000
+
+    # Sehr lange Clips leicht abwerten.
+    if duration > 60:
+        score -= 15000
+
+    # Titel berücksichtigen.
+    title = str(
+        clip.get("title", "")
+    ).lower()
+
+    interesting_words = [
+        "lol",
+        "haha",
+        "wtf",
+        "crazy",
+        "lustig",
+        "lachen",
+        "eskaliert",
+        "reaktion",
+        "reagiert",
+        "rage",
+        "fail",
+        "geil",
+        "bruder",
+        "was",
+        "warum",
+        "chat",
+    ]
+
+    for word in interesting_words:
+        if word in title:
+            score += 5000
 
     return score
 
 
 def main():
-
     print("================================")
     print("ClipCrip2 – intelligente Auswahl")
     print("================================")
 
     token = get_token()
 
-    broadcaster_id = get_broadcaster_id(token)
-
-    print(f"Streamer: {BROADCASTER_LOGIN}")
-    print(f"Zeitraum: letzte {SUCHZEITRAUM_TAGE} Tage")
-
-    clips = get_all_clips(
-        token,
-        broadcaster_id,
+    broadcaster_id = get_broadcaster_id(
+        token
     )
 
-    print(f"Gefundene Clips: {len(clips)}")
+    print(
+        f"Suche Clips von "
+        f"{BROADCASTER_LOGIN}..."
+    )
 
-    used = load_used()
+    clips = get_clips(
+        token,
+        broadcaster_id
+    )
+
+    print(
+        f"{len(clips)} Clips gefunden."
+    )
+
+    used_ids = set(
+        load_json(
+            USED_FILE,
+            []
+        )
+    )
+
+    history = load_json(
+        HISTORY_FILE,
+        {}
+    )
 
     candidates = []
 
     for clip in clips:
 
         clip_id = clip["id"]
-
-        if clip_id in used:
-            continue
 
         duration = float(
             clip.get("duration", 0)
@@ -192,49 +278,86 @@ def main():
             clip.get("view_count", 0)
         )
 
-        # Mindestqualität
+        # Exakt verwendete Twitch-Clips niemals wieder nehmen.
+        if clip_id in used_ids:
+            continue
+
+        # Zu kurze Clips ignorieren.
         if duration < 8:
             continue
 
-        if views < 2:
+        # Clips ohne Aufrufe ignorieren.
+        if views <= 0:
             continue
 
-        score = score_clip(clip)
+        content_key = make_content_key(
+            clip
+        )
+
+        # Bereits in unserer Historie vorhanden.
+        if content_key in history:
+            continue
+
+        score = clip_score(
+            clip
+        )
 
         candidates.append({
             "id": clip_id,
-            "title": clip.get("title", ""),
-            "url": clip.get("url", ""),
+            "title": clip.get(
+                "title",
+                ""
+            ),
+            "url": clip["url"],
             "view_count": views,
             "duration": duration,
             "creator_name": clip.get(
                 "creator_name",
-                "",
+                ""
             ),
             "created_at": clip.get(
                 "created_at",
-                "",
+                ""
             ),
             "thumbnail_url": clip.get(
                 "thumbnail_url",
-                "",
+                ""
             ),
+            "content_key": content_key,
             "score": score,
         })
 
     candidates.sort(
-        key=lambda x: x["score"],
-        reverse=True,
+        key=lambda clip: clip["score"],
+        reverse=True
     )
 
-    auswahl = candidates[:ANZAHL_CLIPS]
+    auswahl = candidates[
+        :ANZAHL_CLIPS
+    ]
 
-    # Nur tatsächlich ausgewählte Clips als benutzt markieren
-    for clip in auswahl:
-        used.add(clip["id"])
+    if len(auswahl) < ANZAHL_CLIPS:
+        raise RuntimeError(
+            f"Nur {len(auswahl)} wirklich neue "
+            f"Clips gefunden. Benötigt werden "
+            f"{ANZAHL_CLIPS}."
+        )
 
-    save_used(used)
+    print("")
+    print("AUSGEWÄHLTE CLIPS:")
 
+    for number, clip in enumerate(
+        auswahl,
+        start=1
+    ):
+        print(
+            f"{number}. "
+            f"{clip['title']} | "
+            f"{clip['view_count']} Views | "
+            f"{clip['duration']:.1f}s"
+        )
+
+    # Für Download-Script.
     with open(
         "clips_today.json",
         "w",
@@ -247,32 +370,37 @@ def main():
             ensure_ascii=False,
         )
 
-    print("")
-    print("TOP AUSWAHL:")
-
-    for i, clip in enumerate(
-        auswahl,
-        start=1,
-    ):
-        print(
-            f"{i}. "
-            f"{clip['title']} | "
-            f"{clip['view_count']} Views | "
-            f"{clip['duration']:.1f}s"
+    # Twitch IDs dauerhaft markieren.
+    for clip in auswahl:
+        used_ids.add(
+            clip["id"]
         )
+
+        history[
+            clip["content_key"]
+        ] = {
+            "clip_id": clip["id"],
+            "title": clip["title"],
+            "created_at": clip["created_at"],
+        }
+
+    save_json(
+        USED_FILE,
+        sorted(list(used_ids))
+    )
+
+    save_json(
+        HISTORY_FILE,
+        history
+    )
 
     print("")
     print(
         f"{len(auswahl)} neue Clips ausgewählt."
     )
-
-    if len(auswahl) < ANZAHL_CLIPS:
-        print(
-            "WARNUNG: Es wurden nicht genügend "
-            "neue geeignete Clips gefunden."
-        )
-
-    print("================================")
+    print(
+        "IDs und Historie gespeichert."
+    )
 
 
 if __name__ == "__main__":
