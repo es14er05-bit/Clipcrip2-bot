@@ -12130,5 +12130,110 @@
         "schlechte Sichtbarkeit"
       ]
     }
+  },
+  "FastSingleDootSMOrc-7fjIbXfZirGK2MBT": {
+    "title": "Hals geknackt",
+    "created_at": "2025-08-31T18:27:31Z",
+    "duration": 28.0,
+    "quality_score": 134.0792516082287,
+    "quality_details": {
+      "duration": 28.000666666666667,
+      "motion": 33.691869212962956,
+      "action": 44.660080909729,
+      "scene_change": 44.73795833333335,
+      "sharpness": 482.42168729181833,
+      "person_presence": 1.0,
+      "person_size": 1.0,
+      "person_center": 0.9839419347047806,
+      "person_action": 1.0,
+      "visibility": 1.0,
+      "audio": 1.0,
+      "metadata": 0.1756,
+      "reasons": []
+    }
+  },
+  "FilthySuccessfulGooseNerfRedBlaster-UDoj7cYv9L4W06vH": {
+    "title": "krasser monitor",
+    "created_at": "2025-08-27T22:34:02Z",
+    "duration": 30.0,
+    "quality_score": 133.23927950067522,
+    "quality_details": {
+      "duration": 30.000666666666667,
+      "motion": 12.027362268518518,
+      "action": 19.847867155075075,
+      "scene_change": 14.670222222222234,
+      "sharpness": 1346.7782179561461,
+      "person_presence": 1.0,
+      "person_size": 1.0,
+      "person_center": 0.8650132501125336,
+      "person_action": 1.0,
+      "visibility": 1.0,
+      "audio": 1.0,
+      "metadata": 0.0492,
+      "reasons": []
+    }
+  },
+  "ObedientCreativeFrogDxCat-5_O5EUbq4Cbm5e-l": {
+    "title": "hahahha",
+    "created_at": "2025-08-26T11:27:54Z",
+    "duration": 30.0,
+    "quality_score": 128.6961923161158,
+    "quality_details": {
+      "duration": 30.000666666666667,
+      "motion": 7.402728009259261,
+      "action": 15.049443483352661,
+      "scene_change": 5.204208333333335,
+      "sharpness": 234.32747789247327,
+      "person_presence": 1.0,
+      "person_size": 1.0,
+      "person_center": 0.9403789719939233,
+      "person_action": 0.997348266232472,
+      "visibility": 0.8796415442865626,
+      "audio": 1.0,
+      "metadata": 2.038,
+      "reasons": []
+    }
+  },
+  "InnocentVainIcecreamTooSpicy-St8LkbKYGGP7ortV": {
+    "title": "Bei 300 schon?!!",
+    "created_at": "2025-08-26T16:31:18Z",
+    "duration": 42.1,
+    "quality_score": 125.88549796161351,
+    "quality_details": {
+      "duration": 42.00066666666667,
+      "motion": 25.30381597222222,
+      "action": 27.173002815246583,
+      "scene_change": 33.47086111111111,
+      "sharpness": 508.7211008411594,
+      "person_presence": 1.0,
+      "person_size": 0.6,
+      "person_center": 0.6143199622631073,
+      "person_action": 1.0,
+      "visibility": 0.8725972735043568,
+      "audio": 1.0,
+      "metadata": 0.0188,
+      "reasons": []
+    }
+  },
+  "DepressedTangentialSpiderPicoMause-N-C00THCBVIEm3-Y": {
+    "title": "😂😂",
+    "created_at": "2025-08-26T02:48:25Z",
+    "duration": 20.6,
+    "quality_score": 125.69019284334654,
+    "quality_details": {
+      "duration": 20.65,
+      "motion": 16.423353009259262,
+      "action": 14.821899652481079,
+      "scene_change": 18.62863888888889,
+      "sharpness": 1000.7308909498104,
+      "person_presence": 1.0,
+      "person_size": 0.6,
+      "person_center": 0.808938205242157,
+      "person_action": 1.0,
+      "visibility": 0.7020704514866992,
+      "audio": 1.0,
+      "metadata": 0.02,
+      "reasons": []
+    }
   }
 }
