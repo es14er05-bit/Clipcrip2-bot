@@ -18,15 +18,10 @@ HISTORY_FILE = "clip_history.json"
 
 FINAL_COUNT = 5
 
-# Strenger als vorher.
 GOOD_SCORE = 48
-
-# Unterhalb davon sollte ein Clip eigentlich
-# niemals Finalist werden.
 HARD_MIN_SCORE = 18
 
 DUPLICATE_THRESHOLD = 0.115
-
 SAMPLE_COUNT = 18
 
 YOLO_MODEL_NAME = "yolo11n.pt"
@@ -43,28 +38,15 @@ def load_json(filename, default):
         return default
 
     try:
-
-        with open(
-            filename,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
+        with open(filename, "r", encoding="utf-8") as file:
             return json.load(file)
-
     except Exception:
-
         return default
 
 
 def save_json(filename, data):
 
-    with open(
-        filename,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
+    with open(filename, "w", encoding="utf-8") as file:
         json.dump(
             data,
             file,
@@ -84,40 +66,17 @@ def get_video_info(path):
     if not cap.isOpened():
         return None
 
-    frames = int(
-        cap.get(
-            cv2.CAP_PROP_FRAME_COUNT
-        )
-    )
-
-    fps = float(
-        cap.get(
-            cv2.CAP_PROP_FPS
-        )
-    )
-
-    width = int(
-        cap.get(
-            cv2.CAP_PROP_FRAME_WIDTH
-        )
-    )
-
-    height = int(
-        cap.get(
-            cv2.CAP_PROP_FRAME_HEIGHT
-        )
-    )
+    frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = float(cap.get(cv2.CAP_PROP_FPS))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     cap.release()
 
     if fps <= 0:
         fps = 30
 
-    if (
-        frames <= 0
-        or width <= 0
-        or height <= 0
-    ):
+    if frames <= 0 or width <= 0 or height <= 0:
         return None
 
     return {
@@ -133,10 +92,7 @@ def get_video_info(path):
 # SAMPLE FRAMES
 # =========================================================
 
-def read_sample_frames(
-    path,
-    count=SAMPLE_COUNT
-):
+def read_sample_frames(path, count=SAMPLE_COUNT):
 
     info = get_video_info(path)
 
@@ -152,14 +108,9 @@ def read_sample_frames(
 
     for i in range(count):
 
-        position = (
-            (i + 0.5)
-            / count
-        )
-
         frame_number = int(
             info["frames"]
-            * position
+            * ((i + 0.5) / count)
         )
 
         cap.set(
@@ -189,12 +140,9 @@ def get_yolo():
         return YOLO_MODEL
 
     try:
-
         from ultralytics import YOLO
 
-        print(
-            "YOLO-Modell wird geladen..."
-        )
+        print("YOLO-Modell wird geladen...")
 
         YOLO_MODEL = YOLO(
             YOLO_MODEL_NAME
@@ -212,118 +160,6 @@ def get_yolo():
 
 
 # =========================================================
-# FACE DETECTOR
-# =========================================================
-
-def face_analysis(frames):
-
-    if not frames:
-
-        return {
-            "presence": 0.0,
-            "size": 0.0,
-            "largest": 0.0,
-        }
-
-    detector = cv2.CascadeClassifier(
-        cv2.data.haarcascades
-        + "haarcascade_frontalface_default.xml"
-    )
-
-    detected_frames = 0
-
-    sizes = []
-
-    largest = 0
-
-    for frame in frames:
-
-        try:
-
-            height, width = frame.shape[:2]
-
-            gray = cv2.cvtColor(
-                frame,
-                cv2.COLOR_BGR2GRAY
-            )
-
-            faces = detector.detectMultiScale(
-                gray,
-                scaleFactor=1.08,
-                minNeighbors=4,
-                minSize=(22, 22)
-            )
-
-            if len(faces) == 0:
-                continue
-
-            detected_frames += 1
-
-            best = max(
-                faces,
-                key=lambda box:
-                box[2] * box[3]
-            )
-
-            x, y, w, h = best
-
-            ratio = (
-                (w * h)
-                /
-                (width * height)
-            )
-
-            sizes.append(
-                ratio
-            )
-
-            largest = max(
-                largest,
-                ratio
-            )
-
-        except Exception:
-
-            continue
-
-    presence = (
-        detected_frames
-        / max(len(frames), 1)
-    )
-
-    average_size = (
-        float(np.mean(sizes))
-        if sizes
-        else 0
-    )
-
-    # Facecams sind oft klein.
-    if average_size >= 0.025:
-        size_score = 1.0
-
-    elif average_size >= 0.012:
-        size_score = 0.85
-
-    elif average_size >= 0.006:
-        size_score = 0.65
-
-    elif average_size >= 0.0025:
-        size_score = 0.40
-
-    elif average_size > 0:
-        size_score = 0.20
-
-    else:
-        size_score = 0.0
-
-    return {
-        "presence": float(presence),
-        "size": float(size_score),
-        "largest": float(largest),
-    }
-
-
-# =========================================================
 # PERSON ANALYSIS
 # =========================================================
 
@@ -331,21 +167,16 @@ def person_analysis(frames):
 
     model = get_yolo()
 
-    if (
-        model is None
-        or not frames
-    ):
-
+    if model is None or not frames:
         return {
-            "presence": 0,
-            "size": 0,
-            "movement": 0,
+            "presence": 0.0,
+            "size": 0.0,
+            "movement": 0.0,
+            "largest": 0.0,
         }
 
     detections = []
-
     centers = []
-
     sizes = []
 
     for frame in frames:
@@ -355,14 +186,11 @@ def person_analysis(frames):
         best = None
 
         try:
-
             results = model(
                 frame,
                 verbose=False
             )
-
         except Exception:
-
             continue
 
         for result in results:
@@ -383,7 +211,7 @@ def person_analysis(frames):
                     box.conf[0].item()
                 )
 
-                if confidence < 0.32:
+                if confidence < 0.28:
                     continue
 
                 x1, y1, x2, y2 = (
@@ -400,22 +228,24 @@ def person_analysis(frames):
                     best is None
                     or area > best["area"]
                 ):
-
                     best = {
                         "area": area,
                         "center_x":
-                            (x1 + x2)
-                            / 2,
+                            (x1 + x2) / 2,
                     }
 
         if best is None:
             continue
 
+        area_ratio = (
+            best["area"]
+            / (width * height)
+        )
+
         detections.append(best)
 
         sizes.append(
-            best["area"]
-            / (width * height)
+            area_ratio
         )
 
         centers.append(
@@ -431,26 +261,29 @@ def person_analysis(frames):
     average_size = (
         float(np.mean(sizes))
         if sizes
-        else 0
+        else 0.0
+    )
+
+    largest = (
+        float(np.max(sizes))
+        if sizes
+        else 0.0
     )
 
     if average_size >= 0.12:
         size_score = 1.0
-
     elif average_size >= 0.06:
-        size_score = 0.85
-
+        size_score = 0.9
     elif average_size >= 0.03:
-        size_score = 0.65
-
-    elif average_size >= 0.012:
-        size_score = 0.40
-
+        size_score = 0.72
+    elif average_size >= 0.015:
+        size_score = 0.52
+    elif average_size >= 0.006:
+        size_score = 0.32
     elif average_size > 0:
-        size_score = 0.15
-
+        size_score = 0.12
     else:
-        size_score = 0
+        size_score = 0.0
 
     if len(centers) >= 3:
 
@@ -462,20 +295,17 @@ def person_analysis(frames):
 
         movement = min(
             1.0,
-            float(
-                np.mean(diffs)
-                * 7
-            )
+            float(np.mean(diffs) * 7)
         )
 
     else:
-
-        movement = 0
+        movement = 0.0
 
     return {
         "presence": float(presence),
         "size": float(size_score),
         "movement": float(movement),
+        "largest": float(largest),
     }
 
 
@@ -486,14 +316,12 @@ def person_analysis(frames):
 def motion_analysis(frames):
 
     if len(frames) < 2:
-
         return {
-            "average": 0,
-            "peak": 0,
+            "average": 0.0,
+            "peak": 0.0,
         }
 
     values = []
-
     previous = None
 
     for frame in frames:
@@ -532,10 +360,9 @@ def motion_analysis(frames):
         previous = gray
 
     if not values:
-
         return {
-            "average": 0,
-            "peak": 0,
+            "average": 0.0,
+            "peak": 0.0,
         }
 
     return {
@@ -559,7 +386,7 @@ def motion_analysis(frames):
 def sharpness_analysis(frames):
 
     if not frames:
-        return 0
+        return 0.0
 
     values = []
 
@@ -619,11 +446,10 @@ def audio_analysis(path):
             result.returncode != 0
             or not result.stdout
         ):
-
             return {
-                "present": 0,
-                "energy": 0,
-                "peakiness": 0,
+                "present": 0.0,
+                "energy": 0.0,
+                "peakiness": 0.0,
             }
 
         samples = np.frombuffer(
@@ -634,17 +460,15 @@ def audio_analysis(path):
         )
 
         if len(samples) < 16000:
-
             return {
                 "present": 0.2,
-                "energy": 0,
-                "peakiness": 0,
+                "energy": 0.0,
+                "peakiness": 0.0,
             }
 
         samples /= 32768.0
 
         window = 4000
-
         rms_values = []
 
         for start in range(
@@ -661,8 +485,7 @@ def audio_analysis(path):
                 np.sqrt(
                     np.mean(
                         chunk * chunk
-                    )
-                    + 1e-9
+                    ) + 1e-9
                 )
             )
 
@@ -671,11 +494,10 @@ def audio_analysis(path):
             )
 
         if not rms_values:
-
             return {
                 "present": 0.5,
-                "energy": 0,
-                "peakiness": 0,
+                "energy": 0.0,
+                "peakiness": 0.0,
             }
 
         average = float(
@@ -703,8 +525,7 @@ def audio_analysis(path):
             (
                 (peak - average)
                 + std
-            )
-            / 0.10
+            ) / 0.10
         )
 
         return {
@@ -716,18 +537,19 @@ def audio_analysis(path):
     except Exception as error:
 
         print(
-            f"Audioanalyse Fehler: {error}"
+            f"Audioanalyse Fehler: "
+            f"{error}"
         )
 
         return {
             "present": 0.5,
-            "energy": 0,
-            "peakiness": 0,
+            "energy": 0.0,
+            "peakiness": 0.0,
         }
 
 
 # =========================================================
-# TITLE
+# TITLE / VIEWS
 # =========================================================
 
 def title_score(metadata):
@@ -755,8 +577,8 @@ def title_score(metadata):
         "reaktion",
         "schreit",
         "schrei",
-        "was",
-        "digga",
+        "jumpscare",
+        "schock",
         "haha",
         "lol",
     ]
@@ -764,7 +586,6 @@ def title_score(metadata):
     score = 0
 
     for word in strong_words:
-
         if word in title:
             score += 2.5
 
@@ -774,49 +595,34 @@ def title_score(metadata):
     )
 
 
-# =========================================================
-# VIEWS
-# =========================================================
-
 def view_score(metadata):
 
     try:
-
         views = int(
             metadata.get(
                 "view_count",
                 0
             )
         )
-
     except Exception:
-
         views = 0
 
     if views >= 100000:
         return 10
-
     if views >= 50000:
         return 9
-
     if views >= 20000:
         return 8
-
     if views >= 10000:
         return 7
-
     if views >= 5000:
         return 6
-
     if views >= 2000:
         return 5
-
     if views >= 1000:
         return 4
-
     if views >= 500:
         return 3
-
     if views >= 100:
         return 2
 
@@ -948,10 +754,6 @@ def analyze_video(
     if not frames:
         return None
 
-    face = face_analysis(
-        frames
-    )
-
     person = person_analysis(
         frames
     )
@@ -968,53 +770,32 @@ def analyze_video(
         frames
     )
 
-    # -----------------------------------------------------
-    # HUMAN VISIBILITY
-    # -----------------------------------------------------
-
-    face_visibility = (
-        face["presence"] * 0.65
-        + face["size"] * 0.35
+    human_visibility = (
+        person["presence"] * 0.72
+        + person["size"] * 0.28
     )
-
-    person_visibility = (
-        person["presence"] * 0.70
-        + person["size"] * 0.30
-    )
-
-    human_visibility = max(
-        face_visibility,
-        person_visibility
-    )
-
-    # -----------------------------------------------------
-    # SCORE
-    # -----------------------------------------------------
 
     score = 0
-
     warnings = []
 
-    # Gesicht / Streamer ist unser wichtigstes Signal.
+    # Mensch/Jussef bleibt Hauptsignal.
     score += (
         human_visibility
-        * 42
+        * 48
     )
 
-    # Gesichtspräsenz extra belohnen.
     score += (
-        face["presence"]
-        * 14
+        person["presence"]
+        * 12
     )
 
-    # Reaktion / Bewegung der Person.
     score += (
         person["movement"]
-        * 7
+        * 8
     )
 
-    # Audio-Spitzen können Lachen,
-    # Schreien oder starke Reaktionen sein.
+    # Audio-Reaktionen sind wichtig,
+    # aber können Gameplay nie alleine retten.
     score += (
         audio["peakiness"]
         * 13
@@ -1025,17 +806,13 @@ def analyze_video(
         * 5
     )
 
-    # Bewegung zählt nur leicht.
-    # Gameplay allein darf keinen Clip retten.
     motion_interest = min(
         1.0,
-        motion["peak"]
-        / 30
+        motion["peak"] / 30
     )
 
     score += (
-        motion_interest
-        * 5
+        motion_interest * 4
     )
 
     score += title_score(
@@ -1046,85 +823,70 @@ def analyze_video(
         metadata
     )
 
-    # Dauer.
     duration = info[
         "duration"
     ]
 
     if 12 <= duration <= 45:
         score += 7
-
     elif 8 <= duration <= 60:
         score += 3
-
     elif duration > 90:
         score -= 10
 
-    # Sehr unscharf.
     if sharpness < 45:
-
         score -= 8
-
         warnings.append(
             "unscharf"
         )
 
-    # -----------------------------------------------------
     # HARTE STRAFEN
-    # -----------------------------------------------------
+    if human_visibility < 0.06:
 
-    if human_visibility < 0.08:
-
-        score -= 35
+        score -= 38
 
         warnings.append(
             "Jussef praktisch nicht sichtbar"
         )
 
-    elif human_visibility < 0.18:
+    elif human_visibility < 0.15:
 
-        score -= 18
+        score -= 22
 
         warnings.append(
             "Jussef schlecht sichtbar"
         )
 
-    elif human_visibility < 0.30:
+    elif human_visibility < 0.28:
 
-        score -= 7
+        score -= 8
 
         warnings.append(
             "Jussef eher klein"
         )
 
-    # Nur viel Gameplay-Bewegung,
-    # aber kein Mensch = genau die Clips,
-    # die du mit 0/10 bzw. 3/10 bewertet hast.
     if (
-        human_visibility < 0.15
+        human_visibility < 0.12
         and motion["peak"] > 12
     ):
 
-        score -= 18
+        score -= 20
 
         warnings.append(
             "Gameplay-Action ohne sichtbare Reaktion"
         )
 
-    # Lautes Audio ohne sichtbare Person
-    # ist ein Backup-Signal, aber kein Topclip.
     if (
-        human_visibility < 0.12
+        human_visibility < 0.10
         and audio["peakiness"] > 0.55
     ):
 
-        score += 7
+        score += 6
 
         warnings.append(
             "Audio interessant, Person fehlt"
         )
 
-    # Statischer Clip.
     if (
         motion["average"] < 2.0
         and audio["peakiness"] < 0.25
@@ -1140,7 +902,6 @@ def analyze_video(
         "path": path,
         "metadata": metadata,
         "info": info,
-        "face": face,
         "person": person,
         "human_visibility":
             human_visibility,
@@ -1155,6 +916,31 @@ def analyze_video(
 
 
 # =========================================================
+# DUPLICATE CHECK
+# =========================================================
+
+def is_duplicate(
+    candidate,
+    selected
+):
+
+    for existing in selected:
+
+        distance = signature_distance(
+            candidate["signature"],
+            existing["signature"]
+        )
+
+        if (
+            distance
+            < DUPLICATE_THRESHOLD
+        ):
+            return True
+
+    return False
+
+
+# =========================================================
 # MAIN
 # =========================================================
 
@@ -1166,7 +952,7 @@ def main():
     )
 
     print(
-        "   CLIPCRIP2 QUALITY CONTROL V2"
+        "CLIPCRIP2 QUALITY CONTROL V2.1"
     )
 
     print(
@@ -1178,7 +964,6 @@ def main():
         exist_ok=True
     )
 
-    # Alten Output entfernen.
     for old in glob.glob(
         os.path.join(
             FINAL_DIR,
@@ -1187,7 +972,6 @@ def main():
     ):
 
         if os.path.isfile(old):
-
             os.remove(old)
 
     candidates = load_json(
@@ -1196,7 +980,6 @@ def main():
     )
 
     if not candidates:
-
         raise RuntimeError(
             "clips_today.json ist leer."
         )
@@ -1238,20 +1021,12 @@ def main():
         )
 
         try:
-
             number = int(
                 filename
                 .split("_")[1]
                 .split(".")[0]
             )
-
         except Exception:
-
-            print(
-                f"Unbekannte Datei: "
-                f"{filename}"
-            )
-
             continue
 
         index = number - 1
@@ -1281,11 +1056,6 @@ def main():
         )
 
         if result is None:
-
-            print(
-                "Analyse fehlgeschlagen."
-            )
-
             continue
 
         analyzed.append(
@@ -1303,13 +1073,13 @@ def main():
         )
 
         print(
-            "Face presence: "
-            f"{result['face']['presence']:.2f}"
+            "Person presence: "
+            f"{result['person']['presence']:.2f}"
         )
 
         print(
-            "Person presence: "
-            f"{result['person']['presence']:.2f}"
+            "Person size: "
+            f"{result['person']['size']:.2f}"
         )
 
         print(
@@ -1322,9 +1092,7 @@ def main():
             f"{result['motion']['peak']:.1f}"
         )
 
-        if result[
-            "warnings"
-        ]:
+        if result["warnings"]:
 
             print(
                 "Warnungen: "
@@ -1336,9 +1104,8 @@ def main():
             )
 
     if not analyzed:
-
         raise RuntimeError(
-            "Kein Video konnte analysiert werden."
+            "Kein Video analysiert."
         )
 
     analyzed.sort(
@@ -1373,178 +1140,82 @@ def main():
             f"{item['metadata'].get('title', '')}"
         )
 
-    # =====================================================
-    # SELECTION
-    # =====================================================
-
     selected = []
 
-    # Zuerst nur wirklich gute Clips.
+    # TOP CLIPS
     for candidate in analyzed:
 
-        if (
-            candidate["score"]
-            < GOOD_SCORE
-        ):
+        if candidate[
+            "score"
+        ] < GOOD_SCORE:
             continue
 
-        duplicate = False
-
-        for existing in selected:
-
-            distance = signature_distance(
-                candidate["signature"],
-                existing["signature"]
-            )
-
-            if (
-                distance
-                < DUPLICATE_THRESHOLD
-            ):
-
-                duplicate = True
-
-                break
-
-        if duplicate:
+        if is_duplicate(
+            candidate,
+            selected
+        ):
             continue
 
         selected.append(
             candidate
         )
 
-        if (
-            len(selected)
-            >= FINAL_COUNT
-        ):
+        if len(selected) >= FINAL_COUNT:
             break
 
-    # =====================================================
-    # FALLBACK
-    #
-    # Wir garantieren weiterhin 5 Dateien.
-    # Aber wir nehmen nicht blind alles.
-    # =====================================================
-
+    # BACKUPS
     if len(selected) < FINAL_COUNT:
-
-        print("")
-        print(
-            "Nicht genug Top-Clips."
-        )
-
-        print(
-            "Suche beste Backups..."
-        )
 
         for candidate in analyzed:
 
             if candidate in selected:
                 continue
 
-            if (
-                candidate["score"]
-                < HARD_MIN_SCORE
-            ):
+            if candidate[
+                "score"
+            ] < HARD_MIN_SCORE:
                 continue
 
-            duplicate = False
-
-            for existing in selected:
-
-                distance = signature_distance(
-                    candidate["signature"],
-                    existing["signature"]
-                )
-
-                if (
-                    distance
-                    < DUPLICATE_THRESHOLD
-                ):
-
-                    duplicate = True
-
-                    break
-
-            if duplicate:
+            if is_duplicate(
+                candidate,
+                selected
+            ):
                 continue
 
             selected.append(
                 candidate
             )
 
-            if (
-                len(selected)
-                >= FINAL_COUNT
-            ):
+            if len(selected) >= FINAL_COUNT:
                 break
 
-    # Falls Twitch an dem Tag wirklich nur
-    # schwaches Material hat, nehmen wir die
-    # besten verbleibenden, damit die Pipeline
-    # nicht komplett stirbt.
+    # FINALER FALLBACK
     if len(selected) < FINAL_COUNT:
-
-        print("")
-        print(
-            "WARNUNG: "
-            "Nicht genug brauchbare Clips."
-        )
-
-        print(
-            "Pipeline-Fallback aktiv."
-        )
 
         for candidate in analyzed:
 
             if candidate in selected:
                 continue
 
-            duplicate = False
-
-            for existing in selected:
-
-                distance = signature_distance(
-                    candidate["signature"],
-                    existing["signature"]
-                )
-
-                if (
-                    distance
-                    < DUPLICATE_THRESHOLD
-                ):
-
-                    duplicate = True
-
-                    break
-
-            if duplicate:
+            if is_duplicate(
+                candidate,
+                selected
+            ):
                 continue
 
             selected.append(
                 candidate
             )
 
-            if (
-                len(selected)
-                >= FINAL_COUNT
-            ):
+            if len(selected) >= FINAL_COUNT:
                 break
 
-    if (
-        len(selected)
-        < FINAL_COUNT
-    ):
+    if len(selected) < FINAL_COUNT:
 
         raise RuntimeError(
             f"Nur {len(selected)} "
-            f"unterschiedliche Clips "
-            f"gefunden."
+            f"unterschiedliche Clips gefunden."
         )
-
-    # =====================================================
-    # SAVE
-    # =====================================================
 
     used = set(
         load_json(
@@ -1635,11 +1306,18 @@ def main():
                     "human_visibility"
                 ],
 
-            "face_presence":
+            "person_presence":
                 candidate[
-                    "face"
+                    "person"
                 ][
                     "presence"
+                ],
+
+            "person_size":
+                candidate[
+                    "person"
+                ][
+                    "size"
                 ],
 
             "audio_excitement":
@@ -1701,17 +1379,11 @@ def main():
     )
 
     print(
-        "QUALITY CONTROL V2 FERTIG"
+        "QUALITY CONTROL V2.1 FERTIG"
     )
 
     print(
         "5 Clips ausgewählt."
-    )
-
-    print(
-        "Gameplay ohne sichtbare "
-        "Reaktion wird jetzt stark "
-        "abgewertet."
     )
 
     print(
