@@ -1,12 +1,10 @@
 import os
 import glob
-import subprocess
-import sys
 import json
 import re
-
-import cv2
-import numpy as np
+import shutil
+import subprocess
+import sys
 
 
 INPUT_DIR = "selected_clips"
@@ -18,6 +16,11 @@ WHISPER_MODEL = "small"
 
 OUTPUT_PREFIX = "jussef_tiktok"
 
+WATERMARK = "@Clipcrip2"
+
+TARGET_WIDTH = 1080
+TARGET_HEIGHT = 1920
+
 
 # =========================================================
 # COMMAND
@@ -25,7 +28,11 @@ OUTPUT_PREFIX = "jussef_tiktok"
 
 def run(command):
 
-    print("RUN:", " ".join(command))
+    print("")
+    print(
+        "RUN:",
+        " ".join(command)
+    )
 
     result = subprocess.run(
         command
@@ -63,378 +70,74 @@ def find_videos():
             )
         )
 
-    return sorted(videos)
+    return sorted(
+        videos
+    )
 
 
 # =========================================================
-# VIDEO INFO
+# CLEAN DIRECTORY
 # =========================================================
 
-def get_video_info(video):
+def clean_output():
 
-    cap = cv2.VideoCapture(
-        video
+    os.makedirs(
+        OUTPUT_DIR,
+        exist_ok=True
     )
 
-    if not cap.isOpened():
-        return None
-
-    width = int(
-        cap.get(
-            cv2.CAP_PROP_FRAME_WIDTH
+    for path in glob.glob(
+        os.path.join(
+            OUTPUT_DIR,
+            "*"
         )
-    )
-
-    height = int(
-        cap.get(
-            cv2.CAP_PROP_FRAME_HEIGHT
-        )
-    )
-
-    frames = int(
-        cap.get(
-            cv2.CAP_PROP_FRAME_COUNT
-        )
-    )
-
-    fps = float(
-        cap.get(
-            cv2.CAP_PROP_FPS
-        )
-    )
-
-    cap.release()
-
-    if fps <= 0:
-        fps = 30
-
-    if width <= 0 or height <= 0:
-        return None
-
-    duration = (
-        frames / fps
-        if frames > 0
-        else 0
-    )
-
-    return {
-        "width": width,
-        "height": height,
-        "frames": frames,
-        "fps": fps,
-        "duration": duration
-    }
-
-
-# =========================================================
-# PERSON / FACE DETECTION
-# =========================================================
-
-def detect_people(video):
-
-    print(
-        "Analysiere Person/Gesicht..."
-    )
-
-    try:
-
-        from ultralytics import YOLO
-
-        model = YOLO(
-            "yolo11n.pt"
-        )
-
-    except Exception as error:
-
-        print(
-            "YOLO nicht verfügbar:"
-            f" {error}"
-        )
-
-        return 0.5
-
-    info = get_video_info(
-        video
-    )
-
-    if info is None:
-        return 0.5
-
-    cap = cv2.VideoCapture(
-        video
-    )
-
-    if not cap.isOpened():
-        return 0.5
-
-    width = info["width"]
-    height = info["height"]
-    duration = info["duration"]
-
-    positions = []
-    weights = []
-
-    # -----------------------------------------------------
-    # Face detector als zusätzliche Hilfe
-    # -----------------------------------------------------
-
-    face_detector = None
-
-    try:
-
-        face_detector = cv2.CascadeClassifier(
-            cv2.data.haarcascades
-            + "haarcascade_frontalface_default.xml"
-        )
-
-    except Exception:
-
-        face_detector = None
-
-    # -----------------------------------------------------
-    # Mehrere Zeitpunkte analysieren
-    # -----------------------------------------------------
-
-    sample_count = 16
-
-    for i in range(
-        sample_count
     ):
 
-        timestamp = (
-            duration
-            * (i + 0.5)
-            / sample_count
-        )
+        if os.path.isfile(path):
 
-        cap.set(
-            cv2.CAP_PROP_POS_MSEC,
-            timestamp * 1000
-        )
+            os.remove(path)
 
-        success, frame = cap.read()
+        elif os.path.isdir(path):
 
-        if not success:
-            continue
+            shutil.rmtree(path)
 
-        frame_height, frame_width = (
-            frame.shape[:2]
-        )
 
-        # -------------------------------------------------
-        # ZUERST Gesicht suchen
-        # -------------------------------------------------
+# =========================================================
+# FILE SAFE NAME
+# =========================================================
 
-        face_found = False
+def safe_name(text):
 
-        if (
-            face_detector is not None
-            and not face_detector.empty()
-        ):
-
-            try:
-
-                gray = cv2.cvtColor(
-                    frame,
-                    cv2.COLOR_BGR2GRAY
-                )
-
-                faces = face_detector.detectMultiScale(
-                    gray,
-                    scaleFactor=1.1,
-                    minNeighbors=5,
-                    minSize=(30, 30)
-                )
-
-                if len(faces) > 0:
-
-                    face = max(
-                        faces,
-                        key=lambda box:
-                        box[2] * box[3]
-                    )
-
-                    x, y, w, h = face
-
-                    center_x = (
-                        x + w / 2
-                    )
-
-                    area = (
-                        w * h
-                    )
-
-                    if area > 0:
-
-                        positions.append(
-                            center_x
-                            / frame_width
-                        )
-
-                        # Gesicht besonders stark gewichten
-                        weights.append(
-                            area * 5
-                        )
-
-                        face_found = True
-
-            except Exception:
-                pass
-
-        if face_found:
-            continue
-
-        # -------------------------------------------------
-        # FALLBACK: GANZE PERSON
-        # -------------------------------------------------
-
-        try:
-
-            results = model(
-                frame,
-                verbose=False
-            )
-
-            best_person = None
-
-            for result in results:
-
-                if result.boxes is None:
-                    continue
-
-                for box in result.boxes:
-
-                    class_id = int(
-                        box.cls[0].item()
-                    )
-
-                    # COCO:
-                    # 0 = person
-                    if class_id != 0:
-                        continue
-
-                    confidence = float(
-                        box.conf[0].item()
-                    )
-
-                    if confidence < 0.40:
-                        continue
-
-                    x1, y1, x2, y2 = (
-                        box.xyxy[0].tolist()
-                    )
-
-                    box_width = (
-                        x2 - x1
-                    )
-
-                    box_height = (
-                        y2 - y1
-                    )
-
-                    area = (
-                        box_width
-                        * box_height
-                    )
-
-                    if (
-                        best_person is None
-                        or area
-                        > best_person[0]
-                    ):
-
-                        best_person = (
-                            area,
-                            (x1 + x2) / 2
-                        )
-
-            if best_person is not None:
-
-                area, center_x = (
-                    best_person
-                )
-
-                positions.append(
-                    center_x
-                    / frame_width
-                )
-
-                weights.append(
-                    max(
-                        area,
-                        1
-                    )
-                )
-
-        except Exception as error:
-
-            print(
-                "Personenerkennung "
-                f"fehlgeschlagen: {error}"
-            )
-
-    cap.release()
-
-    # -----------------------------------------------------
-    # Keine Person gefunden
-    # -----------------------------------------------------
-
-    if not positions:
-
-        print(
-            "Keine Person gefunden."
-        )
-
-        print(
-            "Verwende Bildmitte."
-        )
-
-        return 0.5
-
-    # -----------------------------------------------------
-    # Gewichtete Position
-    # -----------------------------------------------------
-
-    weighted_position = (
-        sum(
-            p * w
-            for p, w in zip(
-                positions,
-                weights
-            )
-        )
-        /
-        sum(weights)
+    text = re.sub(
+        r"[^a-zA-Z0-9_-]",
+        "_",
+        text
     )
 
-    position = max(
-        0.05,
-        min(
-            0.95,
-            weighted_position
-        )
-    )
-
-    print(
-        "Ermittelte "
-        "Personenposition: "
-        f"{position:.3f}"
-    )
-
-    return position
+    return text
 
 
 # =========================================================
 # WHISPER
 # =========================================================
 
-def create_word_timestamps(
-    video
-):
+def create_transcription(video):
+
+    print("")
+    print(
+        "========================================"
+    )
 
     print(
-        f"Whisper analysiert: "
-        f"{video}"
+        "WHISPER"
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        f"Analysiere Sprache: {video}"
     )
 
     base_name = os.path.splitext(
@@ -443,10 +146,9 @@ def create_word_timestamps(
 
     json_file = os.path.join(
         OUTPUT_DIR,
-        f"{base_name}.json"
+        base_name + ".json"
     )
 
-    # Alte Whisper-Datei entfernen
     if os.path.exists(
         json_file
     ):
@@ -455,32 +157,61 @@ def create_word_timestamps(
             json_file
         )
 
-    run([
+    command = [
         sys.executable,
         "-m",
         "whisper",
+
         video,
+
         "--model",
         WHISPER_MODEL,
+
         "--language",
         "German",
+
         "--task",
         "transcribe",
+
         "--word_timestamps",
         "True",
+
         "--output_format",
         "json",
+
         "--output_dir",
-        OUTPUT_DIR
-    ])
+        OUTPUT_DIR,
+
+        "--verbose",
+        "False",
+    ]
+
+    try:
+
+        run(
+            command
+        )
+
+    except Exception as error:
+
+        print(
+            "WARNUNG:"
+        )
+
+        print(
+            f"Whisper fehlgeschlagen: "
+            f"{error}"
+        )
+
+        return None
 
     if not os.path.exists(
         json_file
     ):
 
         print(
-            "Whisper hat keine "
-            "JSON-Datei erzeugt."
+            "WARNUNG: Whisper JSON "
+            "nicht gefunden."
         )
 
         return None
@@ -494,12 +225,32 @@ def create_word_timestamps(
 
 def clean_text(text):
 
+    text = str(
+        text
+    )
+
     text = text.strip()
 
     text = re.sub(
         r"\s+",
         " ",
         text
+    )
+
+    text = (
+        text
+        .replace(
+            "{",
+            "("
+        )
+        .replace(
+            "}",
+            ")"
+        )
+        .replace(
+            "\\",
+            ""
+        )
     )
 
     return text
@@ -512,7 +263,7 @@ def clean_text(text):
 def ass_time(seconds):
 
     seconds = max(
-        0,
+        0.0,
         float(seconds)
     )
 
@@ -521,7 +272,9 @@ def ass_time(seconds):
     )
 
     minutes = int(
-        (seconds % 3600)
+        (
+            seconds % 3600
+        )
         // 60
     )
 
@@ -533,7 +286,8 @@ def ass_time(seconds):
         (
             seconds
             - int(seconds)
-        ) * 100
+        )
+        * 100
     )
 
     return (
@@ -545,7 +299,279 @@ def ass_time(seconds):
 
 
 # =========================================================
-# CREATE ASS
+# EXTRACT WHISPER WORDS
+# =========================================================
+
+def extract_words(data):
+
+    words = []
+
+    for segment in data.get(
+        "segments",
+        []
+    ):
+
+        segment_words = segment.get(
+            "words",
+            []
+        )
+
+        for word in segment_words:
+
+            text = clean_text(
+                word.get(
+                    "word",
+                    ""
+                )
+            )
+
+            if not text:
+                continue
+
+            try:
+
+                start = float(
+                    word.get(
+                        "start"
+                    )
+                )
+
+                end = float(
+                    word.get(
+                        "end"
+                    )
+                )
+
+            except Exception:
+
+                continue
+
+            if end <= start:
+                continue
+
+            words.append({
+                "text": text,
+                "start": start,
+                "end": end,
+            })
+
+    return words
+
+
+# =========================================================
+# EXTRACT SEGMENTS FALLBACK
+# =========================================================
+
+def extract_segments(data):
+
+    segments = []
+
+    for segment in data.get(
+        "segments",
+        []
+    ):
+
+        text = clean_text(
+            segment.get(
+                "text",
+                ""
+            )
+        )
+
+        if not text:
+            continue
+
+        try:
+
+            start = float(
+                segment.get(
+                    "start",
+                    0
+                )
+            )
+
+            end = float(
+                segment.get(
+                    "end",
+                    start + 2
+                )
+            )
+
+        except Exception:
+
+            continue
+
+        if end <= start:
+
+            end = (
+                start
+                + 2
+            )
+
+        segments.append({
+            "text": text,
+            "start": start,
+            "end": end,
+        })
+
+    return segments
+
+
+# =========================================================
+# CREATE CAPTION CHUNKS
+# =========================================================
+
+def words_to_chunks(words):
+
+    chunks = []
+
+    current = []
+
+    for word in words:
+
+        current.append(
+            word
+        )
+
+        text = " ".join(
+            item[
+                "text"
+            ]
+            for item in current
+        )
+
+        finished = False
+
+        # TikTok-artig kurz halten.
+        if len(current) >= 5:
+
+            finished = True
+
+        if len(text) >= 34:
+
+            finished = True
+
+        if word["text"].endswith(
+            (
+                ".",
+                "!",
+                "?",
+                ",",
+                ":",
+                ";",
+            )
+        ):
+
+            if len(current) >= 2:
+
+                finished = True
+
+        if not finished:
+            continue
+
+        chunks.append({
+            "text": text,
+            "start":
+                current[0]["start"],
+            "end":
+                current[-1]["end"],
+        })
+
+        current = []
+
+    if current:
+
+        chunks.append({
+            "text":
+                " ".join(
+                    item["text"]
+                    for item
+                    in current
+                ),
+
+            "start":
+                current[0]["start"],
+
+            "end":
+                current[-1]["end"],
+        })
+
+    return chunks
+
+
+# =========================================================
+# SPLIT LONG SEGMENTS
+# =========================================================
+
+def segment_to_chunks(segment):
+
+    text = segment[
+        "text"
+    ]
+
+    words = text.split()
+
+    if not words:
+
+        return []
+
+    max_words = 5
+
+    groups = [
+        words[i:i + max_words]
+        for i in range(
+            0,
+            len(words),
+            max_words
+        )
+    ]
+
+    duration = (
+        segment["end"]
+        - segment["start"]
+    )
+
+    duration = max(
+        duration,
+        0.5
+    )
+
+    chunks = []
+
+    for index, group in enumerate(
+        groups
+    ):
+
+        start = (
+            segment["start"]
+            + duration
+            * index
+            / len(groups)
+        )
+
+        end = (
+            segment["start"]
+            + duration
+            * (index + 1)
+            / len(groups)
+        )
+
+        chunks.append({
+            "text":
+                " ".join(group),
+
+            "start":
+                start,
+
+            "end":
+                end,
+        })
+
+    return chunks
+
+
+# =========================================================
+# CREATE ASS SUBTITLE FILE
 # =========================================================
 
 def create_ass(
@@ -553,11 +579,12 @@ def create_ass(
     ass_file
 ):
 
-    lines = [
+    header = [
         "[Script Info]",
         "ScriptType: v4.00+",
         "PlayResX: 1080",
         "PlayResY: 1920",
+        "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
         (
@@ -571,11 +598,29 @@ def create_ass(
             "MarginV, Encoding"
         ),
         (
-            "Style: TikTok,Arial,62,"
-            "&H00FFFFFF,&H00FFFFFF,"
-            "&H00000000,&H80000000,"
-            "1,0,0,0,100,100,0,0,"
-            "1,5,2,2,80,80,260,1"
+            "Style: TikTok,"
+            "DejaVu Sans,"
+            "66,"
+            "&H00FFFFFF,"
+            "&H00FFFFFF,"
+            "&H00000000,"
+            "&H80000000,"
+            "-1,"
+            "0,"
+            "0,"
+            "0,"
+            "100,"
+            "100,"
+            "0,"
+            "0,"
+            "1,"
+            "5,"
+            "1,"
+            "2,"
+            "80,"
+            "80,"
+            "340,"
+            "1"
         ),
         "",
         "[Events]",
@@ -583,18 +628,10 @@ def create_ass(
             "Format: Layer, Start, End, "
             "Style, Name, MarginL, MarginR, "
             "MarginV, Effect, Text"
-        )
+        ),
     ]
 
-    # -----------------------------------------------------
-    # Kein Whisper
-    # -----------------------------------------------------
-
     if json_file is None:
-
-        print(
-            "Keine Untertitel."
-        )
 
         with open(
             ass_file,
@@ -603,7 +640,9 @@ def create_ass(
         ) as file:
 
             file.write(
-                "\n".join(lines)
+                "\n".join(
+                    header
+                )
             )
 
         return False
@@ -623,83 +662,59 @@ def create_ass(
     except Exception as error:
 
         print(
-            "Whisper JSON konnte "
-            f"nicht gelesen werden: "
+            f"Whisper JSON Fehler: "
             f"{error}"
         )
 
-        with open(
-            ass_file,
-            "w",
-            encoding="utf-8"
-        ) as file:
-
-            file.write(
-                "\n".join(lines)
-            )
-
         return False
 
-    words = []
+    # -----------------------------------------
+    # PRIORITÄT 1: Word timestamps
+    # -----------------------------------------
 
-    for segment in data.get(
-        "segments",
-        []
-    ):
+    words = extract_words(
+        data
+    )
 
-        for word in segment.get(
-            "words",
-            []
-        ):
+    if words:
 
-            text = clean_text(
-                word.get(
-                    "word",
-                    ""
+        captions = words_to_chunks(
+            words
+        )
+
+    else:
+
+        # -------------------------------------
+        # PRIORITÄT 2:
+        # Whisper-Segmente.
+        # Dadurch bekommen wir auch dann
+        # Untertitel, wenn Word-Timestamps
+        # fehlen.
+        # -------------------------------------
+
+        captions = []
+
+        segments = extract_segments(
+            data
+        )
+
+        for segment in segments:
+
+            captions.extend(
+                segment_to_chunks(
+                    segment
                 )
             )
 
-            if not text:
-                continue
-
-            if (
-                "start" not in word
-                or "end" not in word
-            ):
-                continue
-
-            start = float(
-                word["start"]
-            )
-
-            end = float(
-                word["end"]
-            )
-
-            if end <= start:
-                continue
-
-            words.append({
-                "word": text,
-                "start": start,
-                "end": end
-            })
-
-    # -----------------------------------------------------
-    # WICHTIG:
-    # Kein Timestamp = kein Fehler
-    # -----------------------------------------------------
-
-    if not words:
+    if not captions:
 
         print(
-            "Keine brauchbaren "
-            "Word-Timestamps."
+            "WARNUNG:"
         )
 
         print(
-            "Clip wird OHNE "
-            "Untertitel verarbeitet."
+            "Whisper hat keinen "
+            "gesprochenen Text erkannt."
         )
 
         with open(
@@ -709,125 +724,48 @@ def create_ass(
         ) as file:
 
             file.write(
-                "\n".join(lines)
+                "\n".join(
+                    header
+                )
             )
 
         return False
 
-    # -----------------------------------------------------
-    # Untertitel in kurze Gruppen teilen
-    # -----------------------------------------------------
+    lines = list(
+        header
+    )
 
-    chunk = []
+    for caption in captions:
 
-    for word in words:
-
-        chunk.append(
-            word
+        text = clean_text(
+            caption[
+                "text"
+            ]
         )
 
-        text = word["word"]
-
-        punctuation = (
-            ".",
-            "!",
-            "?",
-            ",",
-            ":",
-            ";"
-        )
-
-        finish = False
-
-        if len(chunk) >= 4:
-            finish = True
-
-        if text.endswith(
-            punctuation
-        ):
-            finish = True
-
-        # zu lange Untertitel vermeiden
-        if len(
-            " ".join(
-                item["word"]
-                for item in chunk
-            )
-        ) > 34:
-
-            finish = True
-
-        if not finish:
+        if not text:
             continue
 
-        start = chunk[0][
-            "start"
-        ]
-
-        end = chunk[-1][
-            "end"
-        ]
-
-        caption = " ".join(
-            item["word"]
-            for item in chunk
-        )
-
-        caption = (
-            caption
+        # ASS reservierte Zeichen.
+        text = (
+            text
             .replace(
-                "{",
-                "("
-            )
-            .replace(
-                "}",
-                ")"
+                "\n",
+                " "
             )
         )
 
         lines.append(
             "Dialogue: 0,"
-            f"{ass_time(start)},"
-            f"{ass_time(end)},"
-            "TikTok,,80,80,260,,"
-            f"{caption}"
-        )
-
-        chunk = []
-
-    if chunk:
-
-        start = chunk[0][
-            "start"
-        ]
-
-        end = chunk[-1][
-            "end"
-        ]
-
-        caption = " ".join(
-            item["word"]
-            for item in chunk
-        )
-
-        caption = (
-            caption
-            .replace(
-                "{",
-                "("
-            )
-            .replace(
-                "}",
-                ")"
-            )
-        )
-
-        lines.append(
-            "Dialogue: 0,"
-            f"{ass_time(start)},"
-            f"{ass_time(end)},"
-            "TikTok,,80,80,260,,"
-            f"{caption}"
+            f"{ass_time(caption['start'])},"
+            f"{ass_time(caption['end'])},"
+            "TikTok,"
+            ","
+            "0,"
+            "0,"
+            "0,"
+            ","
+            f"{text}"
         )
 
     with open(
@@ -840,149 +778,33 @@ def create_ass(
             "\n".join(lines)
         )
 
+    caption_count = (
+        len(lines)
+        - len(header)
+    )
+
     print(
-        f"{len(words)} Wörter "
-        "für Untertitel verarbeitet."
+        f"{caption_count} "
+        f"Untertitelblöcke erstellt."
     )
 
-    return True
+    return (
+        caption_count > 0
+    )
 
 
 # =========================================================
-# CREATE VIDEO
+# ESCAPE ASS PATH FOR FFMPEG
 # =========================================================
 
-def create_video(
-    video,
-    ass_file,
-    output,
-    crop_position
-):
+def escape_filter_path(path):
 
-    info = get_video_info(
-        video
+    absolute = os.path.abspath(
+        path
     )
 
-    if info is None:
-
-        raise RuntimeError(
-            "Videoauflösung konnte "
-            "nicht gelesen werden."
-        )
-
-    width = info[
-        "width"
-    ]
-
-    height = info[
-        "height"
-    ]
-
-    # -----------------------------------------------------
-    # Zielverhältnis 9:16
-    # -----------------------------------------------------
-
-    target_ratio = 9 / 16
-
-    current_ratio = (
-        width / height
-    )
-
-    # -----------------------------------------------------
-    # Bei Landscape:
-    # vertikal aus der Breite ausschneiden
-    # -----------------------------------------------------
-
-    if current_ratio > target_ratio:
-
-        crop_width = int(
-            height
-            * target_ratio
-        )
-
-        crop_height = height
-
-    else:
-
-        # Falls das Original schon
-        # vertikal/nahezu vertikal ist
-        crop_width = width
-        crop_height = int(
-            width
-            / target_ratio
-        )
-
-        crop_height = min(
-            crop_height,
-            height
-        )
-
-    # -----------------------------------------------------
-    # ENTSCHEIDENDER FIX:
-    #
-    # Position = Mittelpunkt der Person.
-    #
-    # Deshalb:
-    #
-    # crop_x =
-    # Personenmittelpunkt
-    # - halbe Cropbreite
-    #
-    # NICHT:
-    # max_x * position
-    #
-    # -----------------------------------------------------
-
-    if crop_width < width:
-
-        person_center_x = (
-            width
-            * crop_position
-        )
-
-        crop_x = int(
-            person_center_x
-            - crop_width / 2
-        )
-
-        max_x = (
-            width
-            - crop_width
-        )
-
-        crop_x = max(
-            0,
-            min(
-                max_x,
-                crop_x
-            )
-        )
-
-    else:
-
-        crop_x = 0
-
-    if crop_height < height:
-
-        crop_y = int(
-            (
-                height
-                - crop_height
-            ) / 2
-        )
-
-    else:
-
-        crop_y = 0
-
-    # -----------------------------------------------------
-    # ASS-Pfad
-    # -----------------------------------------------------
-
-    ass_path = (
-        os.path.abspath(
-            ass_file
-        )
+    absolute = (
+        absolute
         .replace(
             "\\",
             "/"
@@ -991,46 +813,214 @@ def create_video(
             ":",
             "\\:"
         )
+        .replace(
+            "'",
+            "\\'"
+        )
     )
 
-    # -----------------------------------------------------
-    # Filter
-    # -----------------------------------------------------
+    return absolute
 
-    video_filter = (
-        f"crop="
-        f"{crop_width}:"
-        f"{crop_height}:"
-        f"{crop_x}:"
-        f"{crop_y},"
-        "scale=1080:1920,"
-        "setsar=1,"
-        f"ass='{ass_path}'"
+
+# =========================================================
+# VIDEO FILTER
+# =========================================================
+
+def create_filter(
+    ass_file,
+    has_subtitles
+):
+
+    # =====================================================
+    # DESIGN
+    #
+    # Wir schneiden das Streambild NICHT mehr brutal
+    # auf 9:16 zurecht.
+    #
+    # Ebene 1:
+    # Source groß + blurred als Hintergrund.
+    #
+    # Ebene 2:
+    # Komplettes Original proportional skaliert darüber.
+    #
+    # Dadurch bleiben Facecam UND Gameplay sichtbar.
+    # =====================================================
+
+    filter_parts = [
+
+        # Background
+        (
+            "[0:v]"
+            "scale=1080:1920:"
+            "force_original_aspect_ratio=increase,"
+            "crop=1080:1920,"
+            "boxblur=25:10,"
+            "eq=brightness=-0.12,"
+            "setsar=1"
+            "[bg]"
+        ),
+
+        # Originalvideo komplett erhalten
+        (
+            "[0:v]"
+            "scale=1080:1920:"
+            "force_original_aspect_ratio=decrease,"
+            "setsar=1"
+            "[fg]"
+        ),
+
+        # Original mittig auf Background
+        (
+            "[bg][fg]"
+            "overlay="
+            "(W-w)/2:"
+            "(H-h)/2"
+            "[combined]"
+        ),
+    ]
+
+    current = "[combined]"
+
+    # =====================================================
+    # WATERMARK
+    # =====================================================
+
+    # Mittelgroß, mittig, halbtransparent.
+    #
+    # @Clipcrip2 wird dadurch in jedem Export sichtbar,
+    # aber soll die Handlung nicht komplett verdecken.
+
+    filter_parts.append(
+        current
+        +
+        "drawtext="
+        "text='@Clipcrip2':"
+        "font='DejaVu Sans':"
+        "fontsize=54:"
+        "fontcolor=white@0.58:"
+        "borderw=3:"
+        "bordercolor=black@0.40:"
+        "x=(w-text_w)/2:"
+        "y=(h-text_h)/2"
+        "[watermarked]"
+    )
+
+    current = "[watermarked]"
+
+    # =====================================================
+    # SUBTITLES
+    # =====================================================
+
+    if has_subtitles:
+
+        escaped_ass = escape_filter_path(
+            ass_file
+        )
+
+        filter_parts.append(
+            current
+            +
+            "subtitles="
+            f"'{escaped_ass}'"
+            ":fontsdir=/usr/share/fonts/truetype/dejavu"
+            "[final]"
+        )
+
+        current = "[final]"
+
+    return (
+        ";".join(
+            filter_parts
+        ),
+        current
+    )
+
+
+# =========================================================
+# PROCESS ONE VIDEO
+# =========================================================
+
+def process_video(
+    source,
+    output,
+    index
+):
+
+    print("")
+    print(
+        "========================================"
     )
 
     print(
-        "Crop:"
-        f" width={crop_width}"
-        f" height={crop_height}"
-        f" x={crop_x}"
-        f" y={crop_y}"
+        f"VIDEO {index}"
     )
 
-    # -----------------------------------------------------
-    # FFmpeg
-    # -----------------------------------------------------
+    print(
+        "========================================"
+    )
 
-    run([
+    print(
+        f"Quelle: {source}"
+    )
+
+    # -----------------------------------------
+    # 1. WHISPER
+    # -----------------------------------------
+
+    json_file = create_transcription(
+        source
+    )
+
+    # -----------------------------------------
+    # 2. ASS
+    # -----------------------------------------
+
+    ass_file = os.path.join(
+        OUTPUT_DIR,
+        f"caption_{index}.ass"
+    )
+
+    has_subtitles = create_ass(
+        json_file,
+        ass_file
+    )
+
+    print(
+        "Untertitel: "
+        + (
+            "JA"
+            if has_subtitles
+            else "NEIN / KEINE SPRACHE"
+        )
+    )
+
+    # -----------------------------------------
+    # 3. VIDEO FILTER
+    # -----------------------------------------
+
+    filter_complex, final_stream = (
+        create_filter(
+            ass_file,
+            has_subtitles
+        )
+    )
+
+    # -----------------------------------------
+    # 4. FINAL EXPORT
+    # -----------------------------------------
+
+    command = [
         "ffmpeg",
         "-y",
-        "-i",
-        video,
 
-        "-vf",
-        video_filter,
+        "-i",
+        source,
+
+        "-filter_complex",
+        filter_complex,
 
         "-map",
-        "0:v:0",
+        final_stream,
 
         "-map",
         "0:a?",
@@ -1039,10 +1029,19 @@ def create_video(
         "libx264",
 
         "-preset",
-        "fast",
+        "veryfast",
 
         "-crf",
         "20",
+
+        "-pix_fmt",
+        "yuv420p",
+
+        "-profile:v",
+        "high",
+
+        "-level",
+        "4.1",
 
         "-c:a",
         "aac",
@@ -1050,161 +1049,84 @@ def create_video(
         "-b:a",
         "192k",
 
+        "-ar",
+        "48000",
+
         "-movflags",
         "+faststart",
 
-        output
-    ])
+        "-shortest",
 
-
-# =========================================================
-# PROCESS ONE VIDEO
-# =========================================================
-
-def process_video(
-    video,
-    number
-):
-
-    base_name = os.path.splitext(
-        os.path.basename(video)
-    )[0]
-
-    output = os.path.join(
-        OUTPUT_DIR,
-        f"{number:02d}_{OUTPUT_PREFIX}.mp4"
-    )
-
-    ass_file = os.path.join(
-        OUTPUT_DIR,
-        f"{base_name}.ass"
-    )
-
-    json_file = os.path.join(
-        OUTPUT_DIR,
-        f"{base_name}.json"
-    )
-
-    # -----------------------------------------------------
-    # ALTE DATEIEN DIESES CLIPS LÖSCHEN
-    # -----------------------------------------------------
-
-    for old_file in (
         output,
-        ass_file,
-        json_file
-    ):
+    ]
 
-        if os.path.exists(
-            old_file
-        ):
-
-            os.remove(
-                old_file
-            )
-
-    # -----------------------------------------------------
-    # Whisper
-    # -----------------------------------------------------
-
-    whisper_json = (
-        create_word_timestamps(
-            video
-        )
+    run(
+        command
     )
-
-    # -----------------------------------------------------
-    # ASS
-    # -----------------------------------------------------
-
-    create_ass(
-        whisper_json,
-        ass_file
-    )
-
-    # -----------------------------------------------------
-    # Person erkennen
-    # -----------------------------------------------------
-
-    crop_position = detect_people(
-        video
-    )
-
-    print(
-        "Crop Position: "
-        f"{crop_position:.3f}"
-    )
-
-    # -----------------------------------------------------
-    # Video erzeugen
-    # -----------------------------------------------------
-
-    create_video(
-        video,
-        ass_file,
-        output,
-        crop_position
-    )
-
-    # -----------------------------------------------------
-    # Kontrolle
-    # -----------------------------------------------------
 
     if not os.path.exists(
         output
     ):
 
         raise RuntimeError(
-            "FFmpeg hat keine "
-            "Ausgabedatei erzeugt."
+            f"Finales Video fehlt: "
+            f"{output}"
         )
 
     size = os.path.getsize(
         output
     )
 
-    if size < 100_000:
+    if size < 100000:
 
         raise RuntimeError(
-            "Ausgabedatei ist "
-            "ungewöhnlich klein."
+            f"Finales Video ist "
+            f"verdächtig klein: "
+            f"{size} Bytes"
         )
 
+    print("")
     print(
         f"FERTIG: {output}"
     )
 
-
-# =========================================================
-# CLEAN OUTPUT DIRECTORY
-# =========================================================
-
-def clean_output_directory():
-
-    os.makedirs(
-        OUTPUT_DIR,
-        exist_ok=True
+    print(
+        f"Größe: "
+        f"{size / 1024 / 1024:.1f} MB"
     )
 
-    patterns = [
-        "*.mp4",
-        "*.ass",
+    return {
+        "output": output,
+        "subtitles": has_subtitles,
+    }
+
+
+# =========================================================
+# CLEAN TEMP FILES
+# =========================================================
+
+def cleanup_temp_files():
+
+    for extension in (
         "*.json",
-    ]
+        "*.ass",
+        "*.txt",
+        "*.srt",
+        "*.vtt",
+        "*.tsv"
+    ):
 
-    for pattern in patterns:
-
-        for file in glob.glob(
+        for path in glob.glob(
             os.path.join(
                 OUTPUT_DIR,
-                pattern
+                extension
             )
         ):
 
             try:
 
                 os.remove(
-                    file
+                    path
                 )
 
             except Exception:
@@ -1220,100 +1142,104 @@ def main():
 
     print("")
     print(
-        "================================"
-    )
-    print(
-        "TIKTOK VIDEO PROCESSOR"
-    )
-    print(
-        "================================"
+        "========================================"
     )
 
-    os.makedirs(
-        OUTPUT_DIR,
-        exist_ok=True
+    print(
+        "CLIPCRIP2 PROCESSOR V2"
     )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "Features:"
+    )
+
+    print(
+        "- komplette Streamansicht erhalten"
+    )
+
+    print(
+        "- blurred 9:16 Hintergrund"
+    )
+
+    print(
+        "- automatische Whisper-Untertitel"
+    )
+
+    print(
+        "- @Clipcrip2 Wasserzeichen"
+    )
+
+    clean_output()
 
     videos = find_videos()
 
     if not videos:
 
-        raise FileNotFoundError(
-            "Keine ausgewählten Videos "
-            "in selected_clips gefunden."
+        raise RuntimeError(
+            "Keine Videos in "
+            "selected_clips gefunden."
         )
-
-    # -----------------------------------------------------
-    # Nur maximal 5 ausgewählte Clips
-    # -----------------------------------------------------
 
     videos = videos[
         :MAX_VIDEOS
     ]
 
+    print("")
     print(
-        f"{len(videos)} ausgewählte "
-        "Clips gefunden."
+        f"{len(videos)} Videos "
+        f"werden verarbeitet."
     )
 
-    # -----------------------------------------------------
-    # GANZ WICHTIG:
-    # alte Ergebnisse löschen
-    #
-    # Dadurch können alte Videos,
-    # alte ASS-Dateien und alte
-    # Whisper-JSONs nicht versehentlich
-    # wieder in den neuen Workflow
-    # hineinlaufen.
-    # -----------------------------------------------------
+    if len(videos) != 5:
 
-    clean_output_directory()
+        raise RuntimeError(
+            "Es wurden nicht genau "
+            f"5 Input-Videos gefunden. "
+            f"Gefunden: {len(videos)}"
+        )
 
-    successful = 0
+    successful = []
 
-    for number, video in enumerate(
+    failed = []
+
+    for index, source in enumerate(
         videos,
         start=1
     ):
 
-        print("")
-        print(
-            "================================"
-        )
-
-        print(
-            f"CLIP {number}/{len(videos)}"
-        )
-
-        print(
-            os.path.basename(
-                video
+        output = os.path.join(
+            OUTPUT_DIR,
+            (
+                f"{index:02d}_"
+                f"{OUTPUT_PREFIX}.mp4"
             )
-        )
-
-        print(
-            "================================"
         )
 
         try:
 
-            process_video(
-                video,
-                number
+            result = process_video(
+                source,
+                output,
+                index
             )
 
-            successful += 1
+            successful.append(
+                result
+            )
 
         except Exception as error:
 
             print("")
             print(
-                "WARNUNG:"
+                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
             )
 
             print(
-                f"Clip konnte nicht "
-                f"verarbeitet werden:"
+                f"FEHLER VIDEO {index}"
             )
 
             print(
@@ -1321,30 +1247,119 @@ def main():
             )
 
             print(
-                "Dieser Clip wird "
-                "übersprungen."
+                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
             )
+
+            failed.append({
+                "video": source,
+                "error": str(error),
+            })
+
+    cleanup_temp_files()
 
     print("")
     print(
-        "================================"
+        "========================================"
+    )
+
+    print(
+        "ERGEBNIS"
+    )
+
+    print(
+        "========================================"
     )
 
     print(
         f"ERFOLG: "
-        f"{successful}/{len(videos)}"
+        f"{len(successful)}/5"
     )
 
     print(
-        "================================"
+        f"FEHLER: "
+        f"{len(failed)}/5"
     )
 
-    if successful == 0:
+    subtitle_count = sum(
+        1
+        for item in successful
+        if item[
+            "subtitles"
+        ]
+    )
+
+    print(
+        f"MIT UNTERTITELN: "
+        f"{subtitle_count}/"
+        f"{len(successful)}"
+    )
+
+    # Jetzt nicht mehr stillschweigend
+    # mit 1/5 oder 3/5 weitermachen.
+    #
+    # Der Drive-Step soll nur dann laufen,
+    # wenn wirklich alle fünf fertigen
+    # Videos existieren.
+
+    if (
+        len(successful)
+        != 5
+    ):
+
+        print("")
+        print(
+            "FEHLERLISTE:"
+        )
+
+        for item in failed:
+
+            print(
+                item["video"]
+            )
+
+            print(
+                item["error"]
+            )
 
         raise RuntimeError(
-            "Kein Clip konnte "
-            "erfolgreich verarbeitet werden."
+            "Nicht alle 5 Videos "
+            "konnten verarbeitet werden."
         )
+
+    final_files = glob.glob(
+        os.path.join(
+            OUTPUT_DIR,
+            "*.mp4"
+        )
+    )
+
+    if len(final_files) != 5:
+
+        raise RuntimeError(
+            "Output enthält nicht "
+            "genau 5 MP4-Dateien."
+        )
+
+    print("")
+    print(
+        "========================================"
+    )
+
+    print(
+        "PROCESSING V2 ERFOLGREICH"
+    )
+
+    print(
+        "5/5 TikTok-Videos erstellt."
+    )
+
+    print(
+        "@Clipcrip2 auf jedem Video."
+    )
+
+    print(
+        "========================================"
+    )
 
 
 if __name__ == "__main__":
