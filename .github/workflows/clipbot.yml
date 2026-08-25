@@ -1,41 +1,54 @@
 name: ClipCrip2 Bot
+
 on:
   workflow_dispatch:
+
   schedule:
     - cron: "0 8 * * *"
-# Verhindert, dass zwei Läufe gleichzeitig dieselben Dateien
-# und used_clips.json bearbeiten.
+
 concurrency:
   group: clipcrip2-bot
   cancel-in-progress: false
+
 permissions:
   contents: write
+
 jobs:
   clips-holen:
+
     runs-on: ubuntu-latest
+
     steps:
+
       # ==========================================
       # REPOSITORY
       # ==========================================
+
       - name: Repository laden
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       # ==========================================
       # PYTHON
       # ==========================================
+
       - name: Python einrichten
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       # ==========================================
       # ABHÄNGIGKEITEN
       # ==========================================
+
       - name: Abhängigkeiten installieren
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
+
           python -m pip install --upgrade pip
+
           pip install \
             requests \
             yt-dlp \
@@ -43,36 +56,46 @@ jobs:
             ultralytics \
             opencv-python-headless \
             numpy
+
       # ==========================================
       # 1. TWITCH CLIPS FINDEN
       # ==========================================
+
       - name: Twitch Clips finden
         env:
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
         run: |
           python scripts/get_clips.py
+
       # ==========================================
       # 2. CLIPS HERUNTERLADEN
       # ==========================================
+
       - name: Twitch Clips herunterladen
         run: |
           python scripts/download_clips.py
+
       # ==========================================
-      # 3. MULTI-STAGE QUALITY CONTROL
+      # 3. QUALITÄTSKONTROLLE
       # ==========================================
+
       - name: Multi-Stage Quality Control
         run: |
           python scripts/quality_control.py
+
       # ==========================================
-      # 4. TIKTOK-BEARBEITUNG
+      # 4. TIKTOK VIDEOS ERSTELLEN
       # ==========================================
+
       - name: Videos bearbeiten
         run: |
           python scripts/process_clips.py
+
       # ==========================================
-      # 5. FERTIGE VIDEOS ALS ARTIFACT
+      # 5. GITHUB ARTIFACT
       # ==========================================
+
       - name: Fertige TikTok Videos speichern
         uses: actions/upload-artifact@v4
         with:
@@ -80,18 +103,430 @@ jobs:
           path: tiktok_ready/
           if-no-files-found: error
           retention-days: 7
+
       # ==========================================
-      # 6. USED CLIPS SPEICHERN
+      # 6. GOOGLE ACCESS TOKEN HOLEN
       # ==========================================
+
+      - name: Google Drive anmelden
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+
+        run: |
+
+          python - <<'PY'
+
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+
+          data = urllib.parse.urlencode({
+
+              "client_id":
+                  os.environ["GOOGLE_CLIENT_ID"],
+
+              "client_secret":
+                  os.environ["GOOGLE_CLIENT_SECRET"],
+
+              "refresh_token":
+                  os.environ["GOOGLE_REFRESH_TOKEN"],
+
+              "grant_type":
+                  "refresh_token",
+
+          }).encode()
+
+
+          request = urllib.request.Request(
+
+              "https://oauth2.googleapis.com/token",
+
+              data=data,
+
+              method="POST",
+
+          )
+
+
+          with urllib.request.urlopen(
+              request
+          ) as response:
+
+              result = json.load(
+                  response
+              )
+
+
+          access_token = result[
+              "access_token"
+          ]
+
+
+          with open(
+              os.environ["GITHUB_ENV"],
+              "a",
+              encoding="utf-8"
+          ) as env_file:
+
+              env_file.write(
+                  "GOOGLE_DRIVE_ACCESS_TOKEN="
+                  + access_token
+                  + "\n"
+              )
+
+          print(
+              "Google Drive Login erfolgreich."
+          )
+
+          PY
+
+      # ==========================================
+      # 7. VIDEOS ZU GOOGLE DRIVE
+      # ==========================================
+
+      - name: Fertige Videos zu Google Drive hochladen
+        env:
+
+          DRIVE_FOLDER_ID: "14uloS4MQUcnIR-u-0aVOj1NLu3xu975R"
+
+        run: |
+
+          python - <<'PY'
+
+          import glob
+          import json
+          import mimetypes
+          import os
+          import urllib.parse
+          import urllib.request
+          import uuid
+
+
+          files = sorted(
+              glob.glob(
+                  "tiktok_ready/*.mp4"
+              )
+          )
+
+
+          print(
+              f"{len(files)} fertige Videos gefunden."
+          )
+
+
+          if len(files) != 5:
+
+              raise RuntimeError(
+
+                  "Es müssen genau 5 fertige "
+                  "MP4-Dateien vorhanden sein. "
+                  f"Gefunden: {len(files)}"
+
+              )
+
+
+          token = os.environ[
+              "GOOGLE_DRIVE_ACCESS_TOKEN"
+          ]
+
+          folder_id = os.environ[
+              "DRIVE_FOLDER_ID"
+          ]
+
+
+          for path in files:
+
+              filename = os.path.basename(
+                  path
+              )
+
+              mime_type = (
+                  mimetypes.guess_type(
+                      filename
+                  )[0]
+                  or "video/mp4"
+              )
+
+
+              print(
+                  f"Upload wird vorbereitet: "
+                  f"{filename}"
+              )
+
+
+              # ----------------------------------
+              # ALTE DATEI MIT GLEICHEM NAMEN
+              # SUCHEN
+              # ----------------------------------
+
+              safe_filename = (
+                  filename
+                  .replace("\\", "\\\\")
+                  .replace("'", "\\'")
+              )
+
+              query = (
+
+                  f"name='{safe_filename}' "
+                  f"and '{folder_id}' in parents "
+                  "and trashed=false"
+
+              )
+
+
+              list_url = (
+
+                  "https://www.googleapis.com/"
+                  "drive/v3/files?"
+
+                  + urllib.parse.urlencode({
+
+                      "q": query,
+
+                      "fields":
+                          "files(id,name)",
+
+                      "spaces":
+                          "drive",
+
+                  })
+
+              )
+
+
+              req = urllib.request.Request(
+
+                  list_url,
+
+                  headers={
+
+                      "Authorization":
+                          f"Bearer {token}"
+
+                  },
+
+              )
+
+
+              with urllib.request.urlopen(
+                  req
+              ) as response:
+
+                  existing = json.load(
+                      response
+                  ).get(
+                      "files",
+                      []
+                  )
+
+
+              # ----------------------------------
+              # ALTE VERSION LÖSCHEN
+              # ----------------------------------
+
+              for old in existing:
+
+                  print(
+                      "Alte Version wird gelöscht: "
+                      + old["name"]
+                  )
+
+
+                  delete_req = (
+                      urllib.request.Request(
+
+                          "https://www.googleapis.com/"
+                          "drive/v3/files/"
+                          + old["id"],
+
+                          method="DELETE",
+
+                          headers={
+
+                              "Authorization":
+                                  f"Bearer {token}"
+
+                          },
+
+                      )
+                  )
+
+
+                  with urllib.request.urlopen(
+                      delete_req
+                  ):
+
+                      pass
+
+
+              # ----------------------------------
+              # NEUE DATEI HOCHLADEN
+              # ----------------------------------
+
+              metadata = {
+
+                  "name":
+                      filename,
+
+                  "parents":
+                      [folder_id],
+
+              }
+
+
+              boundary = (
+
+                  "clipcrip2_"
+                  + uuid.uuid4().hex
+
+              )
+
+
+              with open(
+                  path,
+                  "rb"
+              ) as video_file:
+
+                  video_data = (
+                      video_file.read()
+                  )
+
+
+              header = (
+
+                  f"--{boundary}\r\n"
+
+                  "Content-Type: "
+                  "application/json; "
+                  "charset=UTF-8\r\n\r\n"
+
+                  + json.dumps(
+                      metadata
+                  )
+
+                  + "\r\n"
+
+                  f"--{boundary}\r\n"
+
+                  f"Content-Type: "
+                  f"{mime_type}\r\n\r\n"
+
+              ).encode(
+                  "utf-8"
+              )
+
+
+              footer = (
+
+                  f"\r\n--{boundary}--\r\n"
+
+              ).encode(
+                  "utf-8"
+              )
+
+
+              body = (
+
+                  header
+                  + video_data
+                  + footer
+
+              )
+
+
+              upload_req = (
+                  urllib.request.Request(
+
+                      "https://www.googleapis.com/"
+                      "upload/drive/v3/files"
+                      "?uploadType=multipart"
+                      "&fields=id,name",
+
+                      data=body,
+
+                      method="POST",
+
+                      headers={
+
+                          "Authorization":
+                              f"Bearer {token}",
+
+                          "Content-Type":
+                              "multipart/related; "
+                              f"boundary={boundary}",
+
+                          "Content-Length":
+                              str(
+                                  len(body)
+                              ),
+
+                      },
+
+                  )
+              )
+
+
+              with urllib.request.urlopen(
+                  upload_req
+              ) as response:
+
+                  uploaded = json.load(
+                      response
+                  )
+
+
+              print(
+
+                  "GOOGLE DRIVE OK: "
+                  + uploaded["name"]
+                  + " | ID: "
+                  + uploaded["id"]
+
+              )
+
+
+          print(
+              "Alle 5 Videos wurden "
+              "zu Google Drive hochgeladen."
+          )
+
+          PY
+
+      # ==========================================
+      # 8. BENUTZTE CLIPS SPEICHERN
+      # ==========================================
+
       - name: Benutzte Clips dauerhaft speichern
         run: |
+
           git config user.name "ClipCrip2 Bot"
-          git config user.email "clipcrip2-bot@users.noreply.github.com"
-          git add used_clips.json clip_history.json
+
+          git config user.email \
+            "clipcrip2-bot@users.noreply.github.com"
+
+          git add \
+            used_clips.json \
+            clip_history.json
+
           if git diff --cached --quiet; then
-            echo "Keine Änderungen an der Clip-Historie."
+
+            echo \
+              "Keine Änderungen an der Clip-Historie."
+
             exit 0
+
           fi
-          git commit -m "Update used Twitch clips"
-          git pull --rebase origin main
-          git push origin main
+
+          git commit \
+            -m "Update used Twitch clips"
+
+          git pull \
+            --rebase \
+            origin main
+
+          git push \
+            origin main
