@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Repository laden
         uses: actions/checkout@v4
         with:
@@ -28,7 +29,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          pip install requests yt-dlp openai-whisper ultralytics opencv-python-headless
+          pip install requests yt-dlp openai-whisper ultralytics opencv-python-headless numpy
 
       - name: Twitch Clips finden
         env:
@@ -36,8 +37,11 @@ jobs:
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
         run: python scripts/get_clips.py
 
-      - name: Twitch Clips herunterladen
+      - name: 20 Kandidaten herunterladen
         run: python scripts/download_clips.py
+
+      - name: Qualitätskontrolle
+        run: python scripts/quality_control.py
 
       - name: Videos bearbeiten
         run: python scripts/process_clips.py
@@ -57,7 +61,7 @@ jobs:
           git add used_clips.json clip_history.json
 
           if git diff --cached --quiet; then
-            echo "Keine Änderungen."
+            echo "Keine Änderungen an der Clip-Historie."
             exit 0
           fi
 
