@@ -9,10 +9,13 @@ import sys
 
 INPUT_DIR = "selected_clips"
 OUTPUT_DIR = "tiktok_ready"
+METADATA_FILE = "clips_today.json"
 
 MAX_VIDEOS = 5
 
-WHISPER_MODEL = "small"
+# Deutlich bessere Erkennung als small,
+# besonders bei Umgangssprache / schwierigerem Audio.
+WHISPER_MODEL = "turbo"
 
 OUTPUT_PREFIX = "jussef_tiktok"
 
@@ -23,27 +26,60 @@ TARGET_HEIGHT = 1920
 
 
 # =========================================================
+# STREAMER / SLANG CONTEXT
+# =========================================================
+
+BASE_PROMPT = (
+    "Dies ist ein deutscher Twitch-Stream von Jussef. "
+    "Die Sprecher reden locker, schnell und umgangssprachlich. "
+    "Häufige Wörter und Namen können sein: "
+    "Jussef, Yussef, Yavuz, Twitch, Discord, Stream, Streamer, "
+    "Chat, Clip, Gameplay, Game, Bro, Bruder, Digga, Digger, "
+    "Junge, Alter, Wallah, Vallah, Mashallah, Inshallah, "
+    "Habibi, safe, cringe, crazy, NPC, Chatten, zocken, "
+    "TikTok, YouTube, Fortnite, Minecraft, GTA. "
+    "Transkribiere das tatsächlich Gesagte möglichst wortgetreu. "
+    "Ändere Umgangssprache nicht unnötig in Hochdeutsch."
+)
+
+
+# =========================================================
 # COMMAND
 # =========================================================
 
 def run(command):
 
     print("")
-    print(
-        "RUN:",
-        " ".join(command)
-    )
+    print("RUN:", " ".join(command))
 
-    result = subprocess.run(
-        command
-    )
+    result = subprocess.run(command)
 
     if result.returncode != 0:
-
         raise RuntimeError(
             "Befehl fehlgeschlagen: "
             + " ".join(command)
         )
+
+
+# =========================================================
+# JSON
+# =========================================================
+
+def load_json(path, default):
+
+    if not os.path.exists(path):
+        return default
+
+    try:
+        with open(
+            path,
+            "r",
+            encoding="utf-8"
+        ) as file:
+            return json.load(file)
+
+    except Exception:
+        return default
 
 
 # =========================================================
@@ -70,13 +106,11 @@ def find_videos():
             )
         )
 
-    return sorted(
-        videos
-    )
+    return sorted(videos)
 
 
 # =========================================================
-# CLEAN DIRECTORY
+# CLEAN OUTPUT
 # =========================================================
 
 def clean_output():
@@ -94,142 +128,19 @@ def clean_output():
     ):
 
         if os.path.isfile(path):
-
             os.remove(path)
 
         elif os.path.isdir(path):
-
             shutil.rmtree(path)
 
 
 # =========================================================
-# FILE SAFE NAME
-# =========================================================
-
-def safe_name(text):
-
-    text = re.sub(
-        r"[^a-zA-Z0-9_-]",
-        "_",
-        text
-    )
-
-    return text
-
-
-# =========================================================
-# WHISPER
-# =========================================================
-
-def create_transcription(video):
-
-    print("")
-    print(
-        "========================================"
-    )
-
-    print(
-        "WHISPER"
-    )
-
-    print(
-        "========================================"
-    )
-
-    print(
-        f"Analysiere Sprache: {video}"
-    )
-
-    base_name = os.path.splitext(
-        os.path.basename(video)
-    )[0]
-
-    json_file = os.path.join(
-        OUTPUT_DIR,
-        base_name + ".json"
-    )
-
-    if os.path.exists(
-        json_file
-    ):
-
-        os.remove(
-            json_file
-        )
-
-    command = [
-        sys.executable,
-        "-m",
-        "whisper",
-
-        video,
-
-        "--model",
-        WHISPER_MODEL,
-
-        "--language",
-        "German",
-
-        "--task",
-        "transcribe",
-
-        "--word_timestamps",
-        "True",
-
-        "--output_format",
-        "json",
-
-        "--output_dir",
-        OUTPUT_DIR,
-
-        "--verbose",
-        "False",
-    ]
-
-    try:
-
-        run(
-            command
-        )
-
-    except Exception as error:
-
-        print(
-            "WARNUNG:"
-        )
-
-        print(
-            f"Whisper fehlgeschlagen: "
-            f"{error}"
-        )
-
-        return None
-
-    if not os.path.exists(
-        json_file
-    ):
-
-        print(
-            "WARNUNG: Whisper JSON "
-            "nicht gefunden."
-        )
-
-        return None
-
-    return json_file
-
-
-# =========================================================
-# TEXT CLEANING
+# TEXT
 # =========================================================
 
 def clean_text(text):
 
-    text = str(
-        text
-    )
-
-    text = text.strip()
+    text = str(text).strip()
 
     text = re.sub(
         r"\s+",
@@ -239,18 +150,24 @@ def clean_text(text):
 
     text = (
         text
-        .replace(
-            "{",
-            "("
-        )
-        .replace(
-            "}",
-            ")"
-        )
-        .replace(
-            "\\",
-            ""
-        )
+        .replace("{", "(")
+        .replace("}", ")")
+        .replace("\\", "")
+    )
+
+    return text
+
+
+def escape_ass_text(text):
+
+    text = clean_text(text)
+
+    text = (
+        text
+        .replace("\\", "")
+        .replace("{", "(")
+        .replace("}", ")")
+        .replace("\n", " ")
     )
 
     return text
@@ -272,10 +189,7 @@ def ass_time(seconds):
     )
 
     minutes = int(
-        (
-            seconds % 3600
-        )
-        // 60
+        (seconds % 3600) // 60
     )
 
     secs = int(
@@ -299,7 +213,122 @@ def ass_time(seconds):
 
 
 # =========================================================
-# EXTRACT WHISPER WORDS
+# WHISPER
+# =========================================================
+
+def create_transcription(
+    video,
+    clip_title=""
+):
+
+    print("")
+    print(
+        "========================================"
+    )
+    print("WHISPER TURBO")
+    print(
+        "========================================"
+    )
+
+    print(
+        f"Analysiere Sprache: {video}"
+    )
+
+    base_name = os.path.splitext(
+        os.path.basename(video)
+    )[0]
+
+    json_file = os.path.join(
+        OUTPUT_DIR,
+        base_name + ".json"
+    )
+
+    if os.path.exists(json_file):
+        os.remove(json_file)
+
+    prompt = BASE_PROMPT
+
+    if clip_title:
+
+        prompt += (
+            " Der Twitch-Clip trägt den Titel: "
+            + clean_text(clip_title)
+            + "."
+        )
+
+    command = [
+        sys.executable,
+        "-m",
+        "whisper",
+
+        video,
+
+        "--model",
+        WHISPER_MODEL,
+
+        "--language",
+        "German",
+
+        "--task",
+        "transcribe",
+
+        "--word_timestamps",
+        "True",
+
+        "--initial_prompt",
+        prompt,
+
+        # stabilere Decodierung
+        "--temperature",
+        "0",
+
+        "--beam_size",
+        "5",
+
+        "--condition_on_previous_text",
+        "False",
+
+        # GitHub Runner = CPU
+        "--fp16",
+        "False",
+
+        "--output_format",
+        "json",
+
+        "--output_dir",
+        OUTPUT_DIR,
+
+        "--verbose",
+        "False",
+    ]
+
+    try:
+
+        run(command)
+
+    except Exception as error:
+
+        print(
+            "WARNUNG: Whisper fehlgeschlagen:"
+        )
+
+        print(error)
+
+        return None
+
+    if not os.path.exists(json_file):
+
+        print(
+            "WARNUNG: Whisper JSON fehlt."
+        )
+
+        return None
+
+    return json_file
+
+
+# =========================================================
+# EXTRACT WORDS
 # =========================================================
 
 def extract_words(data):
@@ -311,12 +340,10 @@ def extract_words(data):
         []
     ):
 
-        segment_words = segment.get(
+        for word in segment.get(
             "words",
             []
-        )
-
-        for word in segment_words:
+        ):
 
             text = clean_text(
                 word.get(
@@ -332,22 +359,23 @@ def extract_words(data):
 
                 start = float(
                     word.get(
-                        "start"
+                        "start",
+                        0
                     )
                 )
 
                 end = float(
                     word.get(
-                        "end"
+                        "end",
+                        start + 0.2
                     )
                 )
 
             except Exception:
-
                 continue
 
             if end <= start:
-                continue
+                end = start + 0.2
 
             words.append({
                 "text": text,
@@ -359,7 +387,7 @@ def extract_words(data):
 
 
 # =========================================================
-# EXTRACT SEGMENTS FALLBACK
+# FALLBACK SEGMENTS
 # =========================================================
 
 def extract_segments(data):
@@ -398,15 +426,10 @@ def extract_segments(data):
             )
 
         except Exception:
-
             continue
 
         if end <= start:
-
-            end = (
-                start
-                + 2
-            )
+            end = start + 2
 
         segments.append({
             "text": text,
@@ -418,10 +441,15 @@ def extract_segments(data):
 
 
 # =========================================================
-# CREATE CAPTION CHUNKS
+# TIKTOK CHUNKS
 # =========================================================
 
 def words_to_chunks(words):
+
+    """
+    Klassischer TikTok-Stil:
+    kurze 2–4 Wortgruppen.
+    """
 
     chunks = []
 
@@ -429,95 +457,79 @@ def words_to_chunks(words):
 
     for word in words:
 
-        current.append(
-            word
-        )
+        current.append(word)
 
-        text = " ".join(
-            item[
-                "text"
-            ]
+        current_text = " ".join(
+            item["text"]
             for item in current
         )
 
-        finished = False
+        duration = (
+            current[-1]["end"]
+            - current[0]["start"]
+        )
 
-        # TikTok-artig kurz halten.
-        if len(current) >= 5:
+        should_finish = False
 
-            finished = True
+        if len(current) >= 4:
+            should_finish = True
 
-        if len(text) >= 34:
+        elif (
+            len(current) >= 3
+            and duration >= 1.2
+        ):
+            should_finish = True
 
-            finished = True
-
-        if word["text"].endswith(
-            (
-                ".",
-                "!",
-                "?",
-                ",",
-                ":",
-                ";",
+        elif (
+            len(current) >= 2
+            and current[-1]["text"].endswith(
+                (
+                    ".",
+                    "!",
+                    "?",
+                    ",",
+                    ":",
+                    ";",
+                )
             )
         ):
+            should_finish = True
 
-            if len(current) >= 2:
+        elif len(current_text) >= 28:
+            should_finish = True
 
-                finished = True
-
-        if not finished:
+        if not should_finish:
             continue
 
-        chunks.append({
-            "text": text,
-            "start":
-                current[0]["start"],
-            "end":
-                current[-1]["end"],
-        })
+        chunks.append(current)
 
         current = []
 
     if current:
-
-        chunks.append({
-            "text":
-                " ".join(
-                    item["text"]
-                    for item
-                    in current
-                ),
-
-            "start":
-                current[0]["start"],
-
-            "end":
-                current[-1]["end"],
-        })
+        chunks.append(current)
 
     return chunks
 
 
 # =========================================================
-# SPLIT LONG SEGMENTS
+# FALLBACK CHUNKS
 # =========================================================
 
-def segment_to_chunks(segment):
+def segment_to_word_groups(segment):
 
-    text = segment[
-        "text"
-    ]
-
-    words = text.split()
+    words = (
+        segment["text"]
+        .split()
+    )
 
     if not words:
-
         return []
 
-    max_words = 5
+    groups = []
 
-    groups = [
+    max_words = 4
+
+    pieces = [
         words[i:i + max_words]
         for i in range(
             0,
@@ -526,52 +538,83 @@ def segment_to_chunks(segment):
         )
     ]
 
-    duration = (
+    duration = max(
+        0.5,
         segment["end"]
         - segment["start"]
     )
 
-    duration = max(
-        duration,
-        0.5
-    )
-
-    chunks = []
-
-    for index, group in enumerate(
-        groups
+    for index, piece in enumerate(
+        pieces
     ):
 
         start = (
             segment["start"]
             + duration
             * index
-            / len(groups)
+            / len(pieces)
         )
 
         end = (
             segment["start"]
             + duration
             * (index + 1)
-            / len(groups)
+            / len(pieces)
         )
 
-        chunks.append({
-            "text":
-                " ".join(group),
-
-            "start":
-                start,
-
-            "end":
-                end,
+        groups.append({
+            "text": " ".join(piece),
+            "start": start,
+            "end": end,
         })
 
-    return chunks
+    return groups
 
 
 # =========================================================
-# CREATE ASS SUBTITLE FILE
+# KARAOKE TEXT
+# =========================================================
+
+def create_karaoke_text(words):
+
+    """
+    ASS Karaoke:
+    gesprochenes Wort wird gelb,
+    Rest bleibt weiß.
+    """
+
+    parts = []
+
+    for word in words:
+
+        duration = max(
+            0.08,
+            word["end"]
+            - word["start"]
+        )
+
+        centiseconds = max(
+            8,
+            int(duration * 100)
+        )
+
+        text = escape_ass_text(
+            word["text"]
+        )
+
+        # \kf sorgt für laufendes Highlighting.
+        parts.append(
+            "{\\kf"
+            + str(centiseconds)
+            + "}"
+            + text
+        )
+
+    return " ".join(parts)
+
+
+# =========================================================
+# ASS SUBTITLE FILE
 # =========================================================
 
 def create_ass(
@@ -585,8 +628,11 @@ def create_ass(
         "PlayResX: 1080",
         "PlayResY: 1920",
         "ScaledBorderAndShadow: yes",
+        "WrapStyle: 2",
         "",
+
         "[V4+ Styles]",
+
         (
             "Format: Name, Fontname, Fontsize, "
             "PrimaryColour, SecondaryColour, "
@@ -597,33 +643,40 @@ def create_ass(
             "Alignment, MarginL, MarginR, "
             "MarginV, Encoding"
         ),
+
         (
             "Style: TikTok,"
             "DejaVu Sans,"
-            "66,"
+            "72,"
             "&H00FFFFFF,"
-            "&H00FFFFFF,"
+            # Karaoke Highlight GELB
+            "&H0000FFFF,"
             "&H00000000,"
-            "&H80000000,"
+            "&H70000000,"
             "-1,"
             "0,"
             "0,"
             "0,"
             "100,"
             "100,"
-            "0,"
+            "1,"
             "0,"
             "1,"
-            "5,"
-            "1,"
+            "6,"
             "2,"
-            "80,"
-            "80,"
-            "340,"
+            # Alignment 2 = unten mittig
+            "2,"
+            "70,"
+            "70,"
+            # etwas oberhalb TikTok UI
+            "420,"
             "1"
         ),
+
         "",
+
         "[Events]",
+
         (
             "Format: Layer, Start, End, "
             "Style, Name, MarginL, MarginR, "
@@ -640,9 +693,7 @@ def create_ass(
         ) as file:
 
             file.write(
-                "\n".join(
-                    header
-                )
+                "\n".join(header)
             )
 
         return False
@@ -655,44 +706,61 @@ def create_ass(
             encoding="utf-8"
         ) as file:
 
-            data = json.load(
-                file
-            )
+            data = json.load(file)
 
     except Exception as error:
 
         print(
-            f"Whisper JSON Fehler: "
-            f"{error}"
+            f"Whisper JSON Fehler: {error}"
         )
 
         return False
 
-    # -----------------------------------------
-    # PRIORITÄT 1: Word timestamps
-    # -----------------------------------------
+    words = extract_words(data)
 
-    words = extract_words(
-        data
-    )
+    lines = list(header)
+
+    # =====================================================
+    # BEST CASE: WORD TIMESTAMPS
+    # =====================================================
 
     if words:
 
-        captions = words_to_chunks(
+        chunks = words_to_chunks(
             words
         )
 
+        for chunk in chunks:
+
+            start = chunk[0]["start"]
+            end = chunk[-1]["end"]
+
+            # Minimale Lesedauer
+            if end - start < 0.35:
+                end = start + 0.35
+
+            text = create_karaoke_text(
+                chunk
+            )
+
+            lines.append(
+                "Dialogue: 0,"
+                f"{ass_time(start)},"
+                f"{ass_time(end)},"
+                "TikTok,"
+                ","
+                "0,"
+                "0,"
+                "0,"
+                ","
+                f"{text}"
+            )
+
+    # =====================================================
+    # FALLBACK
+    # =====================================================
+
     else:
-
-        # -------------------------------------
-        # PRIORITÄT 2:
-        # Whisper-Segmente.
-        # Dadurch bekommen wir auch dann
-        # Untertitel, wenn Word-Timestamps
-        # fehlen.
-        # -------------------------------------
-
-        captions = []
 
         segments = extract_segments(
             data
@@ -700,73 +768,33 @@ def create_ass(
 
         for segment in segments:
 
-            captions.extend(
-                segment_to_chunks(
-                    segment
-                )
+            groups = segment_to_word_groups(
+                segment
             )
 
-    if not captions:
+            for group in groups:
 
-        print(
-            "WARNUNG:"
-        )
-
-        print(
-            "Whisper hat keinen "
-            "gesprochenen Text erkannt."
-        )
-
-        with open(
-            ass_file,
-            "w",
-            encoding="utf-8"
-        ) as file:
-
-            file.write(
-                "\n".join(
-                    header
+                text = escape_ass_text(
+                    group["text"]
                 )
-            )
 
-        return False
+                lines.append(
+                    "Dialogue: 0,"
+                    f"{ass_time(group['start'])},"
+                    f"{ass_time(group['end'])},"
+                    "TikTok,"
+                    ","
+                    "0,"
+                    "0,"
+                    "0,"
+                    ","
+                    f"{text}"
+                )
 
-    lines = list(
-        header
+    caption_count = (
+        len(lines)
+        - len(header)
     )
-
-    for caption in captions:
-
-        text = clean_text(
-            caption[
-                "text"
-            ]
-        )
-
-        if not text:
-            continue
-
-        # ASS reservierte Zeichen.
-        text = (
-            text
-            .replace(
-                "\n",
-                " "
-            )
-        )
-
-        lines.append(
-            "Dialogue: 0,"
-            f"{ass_time(caption['start'])},"
-            f"{ass_time(caption['end'])},"
-            "TikTok,"
-            ","
-            "0,"
-            "0,"
-            "0,"
-            ","
-            f"{text}"
-        )
 
     with open(
         ass_file,
@@ -778,23 +806,16 @@ def create_ass(
             "\n".join(lines)
         )
 
-    caption_count = (
-        len(lines)
-        - len(header)
-    )
-
     print(
         f"{caption_count} "
-        f"Untertitelblöcke erstellt."
+        "TikTok-Untertitelblöcke erstellt."
     )
 
-    return (
-        caption_count > 0
-    )
+    return caption_count > 0
 
 
 # =========================================================
-# ESCAPE ASS PATH FOR FFMPEG
+# ESCAPE PATH
 # =========================================================
 
 def escape_filter_path(path):
@@ -805,18 +826,9 @@ def escape_filter_path(path):
 
     absolute = (
         absolute
-        .replace(
-            "\\",
-            "/"
-        )
-        .replace(
-            ":",
-            "\\:"
-        )
-        .replace(
-            "'",
-            "\\'"
-        )
+        .replace("\\", "/")
+        .replace(":", "\\:")
+        .replace("'", "\\'")
     )
 
     return absolute
@@ -831,24 +843,9 @@ def create_filter(
     has_subtitles
 ):
 
-    # =====================================================
-    # DESIGN
-    #
-    # Wir schneiden das Streambild NICHT mehr brutal
-    # auf 9:16 zurecht.
-    #
-    # Ebene 1:
-    # Source groß + blurred als Hintergrund.
-    #
-    # Ebene 2:
-    # Komplettes Original proportional skaliert darüber.
-    #
-    # Dadurch bleiben Facecam UND Gameplay sichtbar.
-    # =====================================================
-
     filter_parts = [
 
-        # Background
+        # BLURRED BACKGROUND
         (
             "[0:v]"
             "scale=1080:1920:"
@@ -860,7 +857,7 @@ def create_filter(
             "[bg]"
         ),
 
-        # Originalvideo komplett erhalten
+        # KOMPLETTES ORIGINAL
         (
             "[0:v]"
             "scale=1080:1920:"
@@ -869,7 +866,7 @@ def create_filter(
             "[fg]"
         ),
 
-        # Original mittig auf Background
+        # ORIGINAL MITTIG
         (
             "[bg][fg]"
             "overlay="
@@ -884,11 +881,6 @@ def create_filter(
     # =====================================================
     # WATERMARK
     # =====================================================
-
-    # Mittelgroß, mittig, halbtransparent.
-    #
-    # @Clipcrip2 wird dadurch in jedem Export sichtbar,
-    # aber soll die Handlung nicht komplett verdecken.
 
     filter_parts.append(
         current
@@ -929,9 +921,7 @@ def create_filter(
         current = "[final]"
 
     return (
-        ";".join(
-            filter_parts
-        ),
+        ";".join(filter_parts),
         current
     )
 
@@ -943,37 +933,45 @@ def create_filter(
 def process_video(
     source,
     output,
-    index
+    index,
+    metadata
 ):
 
     print("")
     print(
         "========================================"
     )
-
     print(
         f"VIDEO {index}"
     )
-
     print(
         "========================================"
     )
 
+    clip_title = ""
+
+    if isinstance(metadata, dict):
+        clip_title = metadata.get(
+            "title",
+            ""
+        )
+
     print(
-        f"Quelle: {source}"
+        f"Clip-Titel: {clip_title}"
     )
 
-    # -----------------------------------------
-    # 1. WHISPER
-    # -----------------------------------------
+    # =====================================================
+    # 1. TRANSKRIPTION
+    # =====================================================
 
     json_file = create_transcription(
-        source
+        source,
+        clip_title
     )
 
-    # -----------------------------------------
-    # 2. ASS
-    # -----------------------------------------
+    # =====================================================
+    # 2. TIKTOK SUBTITLES
+    # =====================================================
 
     ass_file = os.path.join(
         OUTPUT_DIR,
@@ -990,13 +988,13 @@ def process_video(
         + (
             "JA"
             if has_subtitles
-            else "NEIN / KEINE SPRACHE"
+            else "NEIN"
         )
     )
 
-    # -----------------------------------------
+    # =====================================================
     # 3. VIDEO FILTER
-    # -----------------------------------------
+    # =====================================================
 
     filter_complex, final_stream = (
         create_filter(
@@ -1005,9 +1003,9 @@ def process_video(
         )
     )
 
-    # -----------------------------------------
+    # =====================================================
     # 4. FINAL EXPORT
-    # -----------------------------------------
+    # =====================================================
 
     command = [
         "ffmpeg",
@@ -1060,13 +1058,9 @@ def process_video(
         output,
     ]
 
-    run(
-        command
-    )
+    run(command)
 
-    if not os.path.exists(
-        output
-    ):
+    if not os.path.exists(output):
 
         raise RuntimeError(
             f"Finales Video fehlt: "
@@ -1080,9 +1074,8 @@ def process_video(
     if size < 100000:
 
         raise RuntimeError(
-            f"Finales Video ist "
-            f"verdächtig klein: "
-            f"{size} Bytes"
+            "Finales Video ist "
+            "verdächtig klein."
         )
 
     print("")
@@ -1124,13 +1117,8 @@ def cleanup_temp_files():
         ):
 
             try:
-
-                os.remove(
-                    path
-                )
-
+                os.remove(path)
             except Exception:
-
                 pass
 
 
@@ -1144,31 +1132,25 @@ def main():
     print(
         "========================================"
     )
-
     print(
-        "CLIPCRIP2 PROCESSOR V2"
+        "CLIPCRIP2 PROCESSOR V3"
     )
-
     print(
         "========================================"
     )
 
     print(
-        "Features:"
+        "- Whisper Turbo"
     )
-
     print(
-        "- komplette Streamansicht erhalten"
+        "- Streamer-/Slang-Kontext"
     )
-
     print(
-        "- blurred 9:16 Hintergrund"
+        "- Twitch-Titel als Kontext"
     )
-
     print(
-        "- automatische Whisper-Untertitel"
+        "- TikTok Karaoke Captions"
     )
-
     print(
         "- @Clipcrip2 Wasserzeichen"
     )
@@ -1180,30 +1162,26 @@ def main():
     if not videos:
 
         raise RuntimeError(
-            "Keine Videos in "
-            "selected_clips gefunden."
+            "Keine selected_clips gefunden."
         )
 
     videos = videos[
         :MAX_VIDEOS
     ]
 
-    print("")
-    print(
-        f"{len(videos)} Videos "
-        f"werden verarbeitet."
-    )
-
     if len(videos) != 5:
 
         raise RuntimeError(
-            "Es wurden nicht genau "
-            f"5 Input-Videos gefunden. "
+            f"Nicht genau 5 Videos. "
             f"Gefunden: {len(videos)}"
         )
 
-    successful = []
+    metadata_list = load_json(
+        METADATA_FILE,
+        []
+    )
 
+    successful = []
     failed = []
 
     for index, source in enumerate(
@@ -1219,17 +1197,26 @@ def main():
             )
         )
 
+        metadata = {}
+
+        if (
+            index - 1
+            < len(metadata_list)
+        ):
+            metadata = metadata_list[
+                index - 1
+            ]
+
         try:
 
             result = process_video(
                 source,
                 output,
-                index
+                index,
+                metadata
             )
 
-            successful.append(
-                result
-            )
+            successful.append(result)
 
         except Exception as error:
 
@@ -1237,15 +1224,10 @@ def main():
             print(
                 "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
             )
-
             print(
                 f"FEHLER VIDEO {index}"
             )
-
-            print(
-                str(error)
-            )
-
+            print(error)
             print(
                 "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
             )
@@ -1261,11 +1243,7 @@ def main():
     print(
         "========================================"
     )
-
-    print(
-        "ERGEBNIS"
-    )
-
+    print("ERGEBNIS")
     print(
         "========================================"
     )
@@ -1283,9 +1261,7 @@ def main():
     subtitle_count = sum(
         1
         for item in successful
-        if item[
-            "subtitles"
-        ]
+        if item["subtitles"]
     )
 
     print(
@@ -1294,36 +1270,20 @@ def main():
         f"{len(successful)}"
     )
 
-    # Jetzt nicht mehr stillschweigend
-    # mit 1/5 oder 3/5 weitermachen.
-    #
-    # Der Drive-Step soll nur dann laufen,
-    # wenn wirklich alle fünf fertigen
-    # Videos existieren.
-
-    if (
-        len(successful)
-        != 5
-    ):
-
-        print("")
-        print(
-            "FEHLERLISTE:"
-        )
+    if len(successful) != 5:
 
         for item in failed:
 
             print(
                 item["video"]
             )
-
             print(
                 item["error"]
             )
 
         raise RuntimeError(
             "Nicht alle 5 Videos "
-            "konnten verarbeitet werden."
+            "wurden verarbeitet."
         )
 
     final_files = glob.glob(
@@ -1344,24 +1304,16 @@ def main():
     print(
         "========================================"
     )
-
     print(
-        "PROCESSING V2 ERFOLGREICH"
+        "PROCESSOR V3 ERFOLGREICH"
     )
-
     print(
-        "5/5 TikTok-Videos erstellt."
+        "5/5 Videos fertig."
     )
-
-    print(
-        "@Clipcrip2 auf jedem Video."
-    )
-
     print(
         "========================================"
     )
 
 
 if __name__ == "__main__":
-
     main()
