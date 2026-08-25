@@ -2,378 +2,198 @@ import os
 import glob
 import json
 import shutil
+
 import cv2
 import numpy as np
+
+
 INPUT_DIR = "downloaded_clips"
 FINAL_DIR = "selected_clips"
+
 INPUT_JSON = "clips_today.json"
+
 USED_FILE = "used_clips.json"
 HISTORY_FILE = "clip_history.json"
+
 FINAL_COUNT = 5
+
+
 def load_json(filename, default):
+
     if not os.path.exists(filename):
         return default
+
     try:
+
         with open(
             filename,
             "r",
             encoding="utf-8"
         ) as file:
+
             return json.load(file)
+
     except Exception:
+
         return default
+
+
 def save_json(filename, data):
+
     with open(
         filename,
         "w",
         encoding="utf-8"
     ) as file:
+
         json.dump(
             data,
             file,
             indent=2,
             ensure_ascii=False
         )
+
+
 def get_video_info(path):
+
     cap = cv2.VideoCapture(path)
+
     if not cap.isOpened():
         return None
+
     frames = int(
-        cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        cap.get(
+            cv2.CAP_PROP_FRAME_COUNT
+        )
     )
+
     fps = float(
-        cap.get(cv2.CAP_PROP_FPS)
+        cap.get(
+            cv2.CAP_PROP_FPS
+        )
     )
+
     width = int(
-        cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        cap.get(
+            cv2.CAP_PROP_FRAME_WIDTH
+        )
     )
+
     height = int(
-        cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        cap.get(
+            cv2.CAP_PROP_FRAME_HEIGHT
+        )
     )
+
     if fps <= 0:
         fps = 30
-    if frames <= 0:
-        cap.release()
-        return None
+
     duration = frames / fps
+
     cap.release()
+
     return {
         "frames": frames,
         "fps": fps,
         "width": width,
         "height": height,
-        "duration": duration,
+        "duration": duration
     }
-def load_detectors():
-    detectors = {}
-    # Gesichtserkennung
-    try:
-        face_path = cv2.data.haarcascades + (
-            "haarcascade_frontalface_default.xml"
-        )
-        face_detector = cv2.CascadeClassifier(
-            face_path
-        )
-        if not face_detector.empty():
-            detectors["face"] = face_detector
-    except Exception:
-        pass
-    # YOLO
-    try:
-        from ultralytics import YOLO
-        detectors["yolo"] = YOLO(
-            "yolo11n.pt"
-        )
-    except Exception:
-        print(
-            "YOLO konnte nicht geladen werden."
-        )
-    return detectors
-def analyze_video(path, detectors):
+
+
+def read_sample_frames(path, count=12):
+
     info = get_video_info(path)
-    if info is None:
-        return None
+
+    if not info:
+        return [], None
+
     cap = cv2.VideoCapture(path)
+
     if not cap.isOpened():
-        return None
-    sample_count = 12
-    face_hits = 0
-    person_hits = 0
-    face_positions = []
-    person_positions = []
-    motion_values = []
-    previous_gray = None
-    for i in range(sample_count):
+        return [], info
+
+    frames = []
+
+    total = info["frames"]
+
+    for i in range(count):
+
         position = (
             (i + 0.5)
-            / sample_count
+            / count
         )
+
         frame_number = int(
-            info["frames"] * position
+            total * position
         )
+
         cap.set(
             cv2.CAP_PROP_POS_FRAMES,
             frame_number
         )
+
         success, frame = cap.read()
+
         if not success:
             continue
-        height, width = frame.shape[:2]
-        gray = cv2.cvtColor(
-            frame,
-            cv2.COLOR_BGR2GRAY
-        )
-        small_gray = cv2.resize(
-            gray,
-            (160, 90)
-        )
-        if previous_gray is not None:
-            difference = np.mean(
-                cv2.absdiff(
-                    previous_gray,
-                    small_gray
-                )
-            )
-            motion_values.append(
-                float(difference)
-            )
-        previous_gray = small_gray
-        # -------------------------
-        # Gesicht erkennen
-        # -------------------------
-        if "face" in detectors:
-            try:
-                faces = detectors[
-                    "face"
-                ].detectMultiScale(
-                    gray,
-                    scaleFactor=1.1,
-                    minNeighbors=5,
-                    minSize=(30, 30)
-                )
-                if len(faces) > 0:
-                    # Größtes Gesicht bevorzugen
-                    face = max(
-                        faces,
-                        key=lambda box:
-                        box[2] * box[3]
-                    )
-                    x, y, w, h = face
-                    center_x = (
-                        x + w / 2
-                    ) / width
-                    area_ratio = (
-                        w * h
-                    ) / (
-                        width * height
-                    )
-                    # Sehr kleine zufällige
-                    # Erkennungen ignorieren
-                    if area_ratio >= 0.002:
-                        face_hits += 1
-                        face_positions.append(
-                            (
-                                center_x,
-                                area_ratio
-                            )
-                        )
-            except Exception:
-                pass
-        # -------------------------
-        # Person mit YOLO erkennen
-        # -------------------------
-        if "yolo" in detectors:
-            try:
-                results = detectors[
-                    "yolo"
-                ](
-                    frame,
-                    verbose=False
-                )
-                best_person = None
-                for result in results:
-                    if result.boxes is None:
-                        continue
-                    for box in result.boxes:
-                        class_id = int(
-                            box.cls[0].item()
-                        )
-                        # COCO 0 = person
-                        if class_id != 0:
-                            continue
-                        confidence = float(
-                            box.conf[0].item()
-                        )
-                        if confidence < 0.50:
-                            continue
-                        x1, y1, x2, y2 = (
-                            box.xyxy[0].tolist()
-                        )
-                        area = (
-                            max(0, x2 - x1)
-                            *
-                            max(0, y2 - y1)
-                        )
-                        area_ratio = (
-                            area
-                            /
-                            (width * height)
-                        )
-                        center_x = (
-                            (x1 + x2) / 2
-                        ) / width
-                        candidate = (
-                            area_ratio,
-                            confidence,
-                            center_x
-                        )
-                        if (
-                            best_person is None
-                            or candidate[0]
-                            > best_person[0]
-                        ):
-                            best_person = candidate
-                if best_person is not None:
-                    area_ratio, confidence, center_x = (
-                        best_person
-                    )
-                    if area_ratio >= 0.015:
-                        person_hits += 1
-                        person_positions.append(
-                            (
-                                center_x,
-                                area_ratio
-                            )
-                        )
-            except Exception:
-                pass
+
+        frames.append(frame)
+
     cap.release()
-    face_ratio = (
-        face_hits / sample_count
-    )
-    person_ratio = (
-        person_hits / sample_count
-    )
-    if motion_values:
-        motion = float(
-            np.mean(motion_values)
-        )
-        motion_peak = float(
-            np.max(motion_values)
-        )
-    else:
-        motion = 0
-        motion_peak = 0
-    # Gesicht bevorzugen.
-    # Falls kein Gesicht gefunden wurde,
-    # Personenerkennung verwenden.
-    if face_positions:
-        positions = [
-            p[0]
-            for p in face_positions
-        ]
-        areas = [
-            p[1]
-            for p in face_positions
-        ]
-        weighted_position = np.average(
-            positions,
-            weights=areas
-        )
-    elif person_positions:
-        positions = [
-            p[0]
-            for p in person_positions
-        ]
-        areas = [
-            p[1]
-            for p in person_positions
-        ]
-        weighted_position = np.average(
-            positions,
-            weights=areas
-        )
-    else:
-        weighted_position = 0.5
-    return {
-        "info": info,
-        "face_ratio": face_ratio,
-        "person_ratio": person_ratio,
-        "motion": motion,
-        "motion_peak": motion_peak,
-        "position": float(
-            max(
-                0.15,
-                min(
-                    0.85,
-                    weighted_position
-                )
-            )
-        ),
-    }
+
+    return frames, info
+
+
 def frame_signature(frame):
+
     gray = cv2.cvtColor(
         frame,
         cv2.COLOR_BGR2GRAY
     )
+
     gray = cv2.resize(
         gray,
         (32, 32)
     )
-    hist = cv2.calcHist(
+
+    histogram = cv2.calcHist(
         [gray],
         [0],
         None,
         [32],
         [0, 256]
     )
+
     cv2.normalize(
-        hist,
-        hist
+        histogram,
+        histogram
     )
+
     small = cv2.resize(
         gray,
         (16, 16)
     ).astype(
         np.float32
     ) / 255.0
+
     return (
-        hist.flatten(),
+        histogram.flatten(),
         small.flatten()
     )
-def sample_signatures(path):
-    info = get_video_info(path)
-    if info is None:
-        return []
-    cap = cv2.VideoCapture(path)
-    if not cap.isOpened():
-        return []
-    signatures = []
-    for i in range(8):
-        frame_number = int(
-            info["frames"]
-            * ((i + 0.5) / 8)
-        )
-        cap.set(
-            cv2.CAP_PROP_POS_FRAMES,
-            frame_number
-        )
-        success, frame = cap.read()
-        if not success:
-            continue
-        signatures.append(
-            frame_signature(frame)
-        )
-    cap.release()
-    return signatures
+
+
 def compare_signature(a, b):
+
     hist_a, image_a = a
     hist_b, image_b = b
+
     hist_distance = cv2.compareHist(
         hist_a.astype(np.float32),
         hist_b.astype(np.float32),
         cv2.HISTCMP_BHATTACHARYYA
     )
+
     image_distance = float(
         np.mean(
             np.abs(
@@ -381,134 +201,303 @@ def compare_signature(a, b):
             )
         )
     )
+
     return (
         hist_distance * 0.6
-        +
-        image_distance * 0.4
+        + image_distance * 0.4
     )
+
+
+def video_signature(path):
+
+    frames, info = read_sample_frames(
+        path,
+        12
+    )
+
+    if not frames:
+        return None
+
+    return {
+        "info": info,
+        "signatures": [
+            frame_signature(frame)
+            for frame in frames
+        ]
+    }
+
+
 def compare_videos(a, b):
+
     if not a or not b:
         return 999
+
     distances = []
-    for sig_a in a:
+
+    for sig_a in a["signatures"]:
+
         best = 999
-        for sig_b in b:
+
+        for sig_b in b["signatures"]:
+
             distance = compare_signature(
                 sig_a,
                 sig_b
             )
+
             best = min(
                 best,
                 distance
             )
+
         distances.append(best)
+
     if not distances:
         return 999
+
     return float(
         np.mean(distances)
     )
-def quality_score(
-    analysis,
-    metadata
-):
-    if analysis is None:
+
+
+def motion_score(path):
+
+    frames, _ = read_sample_frames(
+        path,
+        10
+    )
+
+    if len(frames) < 2:
+        return 0
+
+    previous = None
+    differences = []
+
+    for frame in frames:
+
+        gray = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2GRAY
+        )
+
+        gray = cv2.resize(
+            gray,
+            (160, 90)
+        )
+
+        if previous is not None:
+
+            diff = np.mean(
+                cv2.absdiff(
+                    previous,
+                    gray
+                )
+            )
+
+            differences.append(
+                float(diff)
+            )
+
+        previous = gray
+
+    if not differences:
+        return 0
+
+    return float(
+        np.mean(differences)
+    )
+
+
+def sharpness_score(path):
+
+    frames, _ = read_sample_frames(
+        path,
+        8
+    )
+
+    if not frames:
+        return 0
+
+    scores = []
+
+    for frame in frames:
+
+        gray = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2GRAY
+        )
+
+        scores.append(
+            cv2.Laplacian(
+                gray,
+                cv2.CV_64F
+            ).var()
+        )
+
+    return float(
+        np.mean(scores)
+    )
+
+
+def scene_change_score(path):
+
+    frames, _ = read_sample_frames(
+        path,
+        12
+    )
+
+    if len(frames) < 2:
+        return 0
+
+    differences = []
+
+    previous = None
+
+    for frame in frames:
+
+        gray = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2GRAY
+        )
+
+        gray = cv2.resize(
+            gray,
+            (128, 72)
+        )
+
+        if previous is not None:
+
+            difference = np.mean(
+                cv2.absdiff(
+                    previous,
+                    gray
+                )
+            )
+
+            differences.append(
+                float(difference)
+            )
+
+        previous = gray
+
+    if not differences:
+        return 0
+
+    return float(
+        np.mean(differences)
+    )
+
+
+def quality_score(path, metadata):
+
+    info = get_video_info(path)
+
+    if not info:
         return -999
-    info = analysis["info"]
+
     duration = info["duration"]
-    width = info["width"]
-    height = info["height"]
-    score = 0
-    # -------------------------
-    # Länge
-    # -------------------------
+
     if duration < 8:
         return -999
+
+    score = 0
+
+    # -------------------------------------------------
+    # Dauer
+    # -------------------------------------------------
+
     if 12 <= duration <= 45:
-        score += 20
+        score += 25
+
     elif 8 <= duration < 12:
         score += 5
+
     elif 45 < duration <= 60:
-        score += 8
+        score += 10
+
     elif duration > 90:
         score -= 20
-    # -------------------------
-    # Videoqualität
-    # -------------------------
+
+    # -------------------------------------------------
+    # Auflösung
+    # -------------------------------------------------
+
+    width = info["width"]
+    height = info["height"]
+
     if width >= 1280:
-        score += 8
+        score += 10
+
     if height >= 720:
         score += 5
-    # -------------------------
-    # Jussef sichtbar
-    # -------------------------
-    face_ratio = analysis[
-        "face_ratio"
-    ]
-    person_ratio = analysis[
-        "person_ratio"
-    ]
-    # Gesicht ist das stärkste Signal
-    if face_ratio >= 0.75:
-        score += 30
-    elif face_ratio >= 0.50:
-        score += 22
-    elif face_ratio >= 0.30:
-        score += 12
-    elif face_ratio >= 0.15:
-        score += 3
-    else:
-        score -= 20
-    # Person zusätzlich
-    if person_ratio >= 0.70:
-        score += 15
-    elif person_ratio >= 0.45:
-        score += 10
-    elif person_ratio >= 0.25:
+
+    # -------------------------------------------------
+    # Bewegung
+    # -------------------------------------------------
+
+    motion = motion_score(path)
+
+    if motion >= 2:
         score += 5
-    else:
-        score -= 10
-    # -------------------------
-    # Bewegung / Action
-    # -------------------------
-    motion = analysis[
-        "motion"
-    ]
-    peak = analysis[
-        "motion_peak"
-    ]
-    if motion >= 8:
-        score += 15
-    elif motion >= 5:
+
+    if motion >= 5:
         score += 10
-    elif motion >= 3:
+
+    if motion >= 9:
         score += 5
-    else:
-        score -= 10
-    if peak >= 12:
-        score += 8
-    # -------------------------
+
+    # -------------------------------------------------
+    # Szenenwechsel
+    # -------------------------------------------------
+
+    scene = scene_change_score(path)
+
+    if scene >= 3:
+        score += 5
+
+    if scene >= 7:
+        score += 5
+
+    # -------------------------------------------------
+    # Bildschärfe
+    # -------------------------------------------------
+
+    sharpness = sharpness_score(path)
+
+    if sharpness >= 80:
+        score += 5
+
+    if sharpness >= 200:
+        score += 5
+
+    # -------------------------------------------------
     # Twitch Views
-    # -------------------------
+    # -------------------------------------------------
+
     views = int(
         metadata.get(
             "view_count",
             0
         )
     )
+
     score += min(
-        views / 1000,
+        views / 2000,
         15
     )
-    # -------------------------
-    # Titel-Signale
-    # -------------------------
+
+    # -------------------------------------------------
+    # Titel
+    # -------------------------------------------------
+
     title = str(
         metadata.get(
             "title",
             ""
         )
     ).lower()
-    interesting_words = [
+
+    keywords = [
         "lol",
         "haha",
         "wtf",
@@ -519,57 +508,35 @@ def quality_score(
         "reaktion",
         "rage",
         "fail",
+        "chat",
         "bruder",
-        "digga",
+        "bro",
         "krank",
-        "was",
-        "nein",
+        "geil",
+        "alter"
     ]
-    for word in interesting_words:
+
+    for word in keywords:
+
         if word in title:
+
             score += 3
+
     return score
-def main():
-    print("================================")
-    print("CLIPCRİP2 QUALITY CONTROL")
-    print("================================")
-    os.makedirs(
-        FINAL_DIR,
-        exist_ok=True
-    )
-    # Alten Auswahlordner leeren
-    for old in glob.glob(
-        os.path.join(
-            FINAL_DIR,
-            "*"
-        )
-    ):
-        if os.path.isfile(old):
-            os.remove(old)
-    if not os.path.exists(
-        INPUT_JSON
-    ):
-        raise FileNotFoundError(
-            f"{INPUT_JSON} fehlt."
-        )
-    with open(
-        INPUT_JSON,
-        "r",
-        encoding="utf-8"
-    ) as file:
-        candidates = json.load(file)
-    if not candidates:
-        raise RuntimeError(
-            "Keine Kandidaten vorhanden."
-        )
-    video_files = []
+
+
+def find_video_files():
+
+    videos = []
+
     for extension in (
         "mp4",
         "mkv",
         "webm",
         "mov"
     ):
-        video_files.extend(
+
+        videos.extend(
             glob.glob(
                 os.path.join(
                     INPUT_DIR,
@@ -577,154 +544,232 @@ def main():
                 )
             )
         )
-    video_files.sort()
+
+    return sorted(videos)
+
+
+def main():
+
+    print("")
+    print("================================")
+    print("MULTI-STAGE QUALITY CONTROL")
+    print("================================")
+
+    os.makedirs(
+        FINAL_DIR,
+        exist_ok=True
+    )
+
+    # Alte Auswahl löschen
+    for old in glob.glob(
+        os.path.join(
+            FINAL_DIR,
+            "*"
+        )
+    ):
+
+        if os.path.isfile(old):
+            os.remove(old)
+
+    if not os.path.exists(
+        INPUT_JSON
+    ):
+
+        raise FileNotFoundError(
+            "clips_today.json fehlt."
+        )
+
+    with open(
+        INPUT_JSON,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
+        candidates = json.load(file)
+
+    videos = find_video_files()
+
+    if not videos:
+
+        raise FileNotFoundError(
+            "Keine heruntergeladenen "
+            "Videos gefunden."
+        )
+
     print(
-        f"{len(video_files)} Kandidaten "
+        f"{len(videos)} Kandidaten "
         "werden geprüft."
     )
-    detectors = load_detectors()
+
     analyzed = []
-    for video in video_files:
+
+    # -------------------------------------------------
+    # STUFE 1: Technische Analyse
+    # -------------------------------------------------
+
+    for video in videos:
+
         filename = os.path.basename(
             video
         )
+
         try:
+
             number = int(
                 filename
                 .split("_")[1]
                 .split(".")[0]
             )
+
         except Exception:
-            print(
-                f"Überspringe: {filename}"
-            )
+
             continue
+
         index = number - 1
-        if (
-            index < 0
-            or index >= len(candidates)
-        ):
+
+        if index < 0:
             continue
+
+        if index >= len(candidates):
+            continue
+
         metadata = candidates[index]
-        analysis = analyze_video(
-            video,
-            detectors
-        )
-        if analysis is None:
-            print(
-                f"Analyse fehlgeschlagen: "
-                f"{filename}"
-            )
-            continue
-        score = quality_score(
-            analysis,
-            metadata
-        )
-        print(
-            f"{filename} | "
-            f"Score {score:.1f} | "
-            f"Gesicht "
-            f"{analysis['face_ratio']:.0%} | "
-            f"Person "
-            f"{analysis['person_ratio']:.0%} | "
-            f"Motion "
-            f"{analysis['motion']:.1f}"
-        )
-        # Sehr schlechte Clips sofort raus
-        if score < 25:
-            print(
-                "  → AUSGESONDERT"
-            )
-            continue
-        signatures = sample_signatures(
+
+        signature = video_signature(
             video
         )
+
+        if not signature:
+            continue
+
+        score = quality_score(
+            video,
+            metadata
+        )
+
         analyzed.append({
             "path": video,
             "metadata": metadata,
-            "analysis": analysis,
-            "signatures": signatures,
-            "score": score,
+            "signature": signature,
+            "score": score
         })
-    # Beste zuerst
+
+        print(
+            f"{filename}: "
+            f"Score {score:.1f}"
+        )
+
+    # -------------------------------------------------
+    # STUFE 2: Sortierung
+    # -------------------------------------------------
+
     analyzed.sort(
         key=lambda x: x["score"],
         reverse=True
     )
+
+    # -------------------------------------------------
+    # STUFE 3: Ähnliche Clips entfernen
+    # -------------------------------------------------
+
     selected = []
+
     for candidate in analyzed:
+
+        if candidate["score"] < 15:
+            continue
+
         duplicate = False
+
         for existing in selected:
+
             similarity = compare_videos(
-                candidate["signatures"],
-                existing["signatures"]
+                candidate["signature"],
+                existing["signature"]
             )
-            if similarity < 0.12:
+
+            if similarity < 0.10:
+
                 duplicate = True
+
                 print(
-                    "ÄHNLICHER CLIP ENTFERNT:"
-                )
-                print(
-                    candidate[
-                        "metadata"
-                    ].get(
+                    "ÄHNLICHER CLIP ENTFERNT: "
+                    + candidate["metadata"].get(
                         "title",
                         ""
                     )
                 )
+
                 break
+
         if duplicate:
             continue
+
         selected.append(
             candidate
         )
+
         if len(selected) >= FINAL_COUNT:
             break
+
+    # -------------------------------------------------
+    # Ergebnis
+    # -------------------------------------------------
+
     if len(selected) < FINAL_COUNT:
+
         raise RuntimeError(
-            "Quality Control konnte nur "
-            f"{len(selected)} statt "
-            f"{FINAL_COUNT} wirklich "
-            "brauchbare und unterschiedliche "
-            "Clips finden."
+            "Quality Control konnte keine "
+            "5 ausreichend guten und "
+            "unterschiedlichen Clips finden."
         )
+
     used = set(
         load_json(
             USED_FILE,
             []
         )
     )
+
     history = load_json(
         HISTORY_FILE,
         {}
     )
+
     final_metadata = []
+
     print("")
     print("================================")
-    print("FINALE AUSWAHL")
+    print("DIE BESTEN 5")
     print("================================")
+
     for number, candidate in enumerate(
         selected,
         start=1
     ):
+
         source = candidate["path"]
+
         destination = os.path.join(
             FINAL_DIR,
             f"clip_{number}.mp4"
         )
+
         shutil.copy2(
             source,
             destination
         )
+
         metadata = candidate[
             "metadata"
         ]
-        clip_id = metadata[
-            "id"
-        ]
+
+        clip_id = metadata["id"]
+
         used.add(
             clip_id
         )
+
         history[clip_id] = {
             "title": metadata.get(
                 "title",
@@ -734,62 +779,51 @@ def main():
                 "created_at",
                 ""
             ),
-            "duration": metadata.get(
-                "duration",
-                0
-            ),
-            "quality_score": candidate[
-                "score"
-            ],
-            "face_ratio": candidate[
-                "analysis"
-            ]["face_ratio"],
-            "person_ratio": candidate[
-                "analysis"
-            ]["person_ratio"],
-            "motion": candidate[
-                "analysis"
-            ]["motion"],
+            "score": candidate["score"]
         }
+
         final_metadata.append(
             metadata
         )
+
         print(
             f"{number}. "
             f"{metadata.get('title', '')} "
             f"| Score "
             f"{candidate['score']:.1f}"
         )
-    # WICHTIG:
-    # clips_today.json enthält ab jetzt
-    # nur noch die finalen 5.
+
+    save_json(
+        USED_FILE,
+        sorted(used)
+    )
+
+    save_json(
+        HISTORY_FILE,
+        history
+    )
+
     with open(
         INPUT_JSON,
         "w",
         encoding="utf-8"
     ) as file:
+
         json.dump(
             final_metadata,
             file,
             indent=2,
             ensure_ascii=False
         )
-    save_json(
-        USED_FILE,
-        sorted(
-            list(used)
-        )
-    )
-    save_json(
-        HISTORY_FILE,
-        history
-    )
+
     print("")
     print(
-        "QUALITY CONTROL ERFOLGREICH"
+        "QUALITY CONTROL ERFOLGREICH."
     )
     print(
-        "5 Clips ausgewählt."
+        "5 Kandidaten ausgewählt."
     )
+
+
 if __name__ == "__main__":
     main()
