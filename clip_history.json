@@ -12235,5 +12235,55 @@
       "metadata": 0.02,
       "reasons": []
     }
+  },
+  "CuteLivelyPlumageSSSsss-hrO1x0qJFfB8u4IB": {
+    "title": "schock",
+    "created_at": "2025-08-27T23:09:13Z",
+    "duration": 16.3,
+    "quality_score": 94.9744397015597,
+    "human_visibility": 0.972,
+    "person_presence": 1.0,
+    "person_size": 0.9,
+    "audio_excitement": 1.0
+  },
+  "PoliteNeighborlySheepPanicBasket-vp5viIFjAb33iVv9": {
+    "title": "Jumpscare",
+    "created_at": "2025-08-28T22:32:56Z",
+    "duration": 20.7,
+    "quality_score": 93.41304854031779,
+    "human_visibility": 0.9216,
+    "person_presence": 1.0,
+    "person_size": 0.72,
+    "audio_excitement": 0.9477347595402703
+  },
+  "GrossFurtiveNuggetsPrimeMe-O4t2alph8kULyVVu": {
+    "title": "oha",
+    "created_at": "2025-08-31T18:26:36Z",
+    "duration": 30.0,
+    "quality_score": 89.28750713782017,
+    "human_visibility": 1.0,
+    "person_presence": 1.0,
+    "person_size": 1.0,
+    "audio_excitement": 1.0
+  },
+  "TemperedGeniusWaffleCharlietheUnicorn-cIdSB6dQZHUiQ6X2": {
+    "title": "auf Jussef achten ^^",
+    "created_at": "2025-08-28T22:49:08Z",
+    "duration": 19.2,
+    "quality_score": 88.76882890969715,
+    "human_visibility": 0.9216,
+    "person_presence": 1.0,
+    "person_size": 0.72,
+    "audio_excitement": 1.0
+  },
+  "AnnoyingComfortableSquidGingerPower-s28RdThxsWEerNlS": {
+    "title": "jj",
+    "created_at": "2025-08-26T14:35:18Z",
+    "duration": 30.0,
+    "quality_score": 88.08234190261805,
+    "human_visibility": 0.9216,
+    "person_presence": 1.0,
+    "person_size": 0.72,
+    "audio_excitement": 1.0
   }
 }
