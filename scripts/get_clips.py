@@ -8,11 +8,13 @@ CLIENT_SECRET = os.environ["TWITCH_CLIENT_SECRET"]
 
 BROADCASTER_LOGIN = "jussef"
 
-# Wir holen deutlich mehr Kandidaten.
+# Wir sammeln viele Kandidaten.
+# Die Quality-Control entscheidet später, welche 5 wirklich gut sind.
 KANDIDATEN_ANZAHL = 40
 
 SUCHZEITRAUM_TAGE = 30
 USED_FILE = "used_clips.json"
+OUTPUT_FILE = "clips_today.json"
 
 
 def get_token():
@@ -64,60 +66,25 @@ def get_clips(token, broadcaster_id):
         "Authorization": f"Bearer {token}",
     }
 
-    now = datetime.datetime.now(datetime.timezone.utc)
-
     since = (
-        now - datetime.timedelta(days=SUCHZEITRAUM_TAGE)
+        datetime.datetime.now(datetime.timezone.utc)
+        - datetime.timedelta(days=SUCHZEITRAUM_TAGE)
     ).isoformat().replace("+00:00", "Z")
 
-    until = now.isoformat().replace("+00:00", "Z")
-
-    all_clips = []
-    cursor = None
-
-    # Mehrere Seiten abrufen.
-    for page in range(10):
-
-        params = {
+    response = requests.get(
+        "https://api.twitch.tv/helix/clips",
+        params={
             "broadcaster_id": broadcaster_id,
             "started_at": since,
-            "ended_at": until,
             "first": 100,
-        }
+        },
+        headers=headers,
+        timeout=30,
+    )
 
-        if cursor:
-            params["after"] = cursor
+    response.raise_for_status()
 
-        response = requests.get(
-            "https://api.twitch.tv/helix/clips",
-            params=params,
-            headers=headers,
-            timeout=30,
-        )
-
-        response.raise_for_status()
-
-        result = response.json()
-
-        clips = result.get("data", [])
-
-        all_clips.extend(clips)
-
-        print(
-            f"Twitch-Seite {page + 1}: "
-            f"{len(clips)} Clips"
-        )
-
-        cursor = (
-            result
-            .get("pagination", {})
-            .get("cursor")
-        )
-
-        if not cursor:
-            break
-
-    return all_clips
+    return response.json().get("data", [])
 
 
 def load_used():
@@ -128,8 +95,9 @@ def load_used():
         with open(
             USED_FILE,
             "r",
-            encoding="utf-8",
+            encoding="utf-8"
         ) as file:
+
             data = json.load(file)
 
         if not isinstance(data, list):
@@ -137,87 +105,39 @@ def load_used():
 
         return set(data)
 
-    except Exception:
+    except (
+        json.JSONDecodeError,
+        OSError,
+        TypeError,
+    ):
         return set()
 
 
-def calculate_candidate_score(clip):
-    """
-    Nur eine VORauswahl.
-    Die eigentliche Qualitätskontrolle passiert später.
-    """
+def save_candidates(candidates):
+    with open(
+        OUTPUT_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
 
-    score = 0.0
-
-    views = int(
-        clip.get(
-            "view_count",
-            0,
+        json.dump(
+            candidates,
+            file,
+            indent=2,
+            ensure_ascii=False
         )
-    )
-
-    duration = float(
-        clip.get(
-            "duration",
-            0,
-        )
-    )
-
-    # Views sind nur ein Signal.
-    score += min(views / 500.0, 30.0)
-
-    # Sinnvolle Clip-Längen bevorzugen.
-    if 10 <= duration <= 45:
-        score += 15
-
-    elif 8 <= duration < 10:
-        score += 3
-
-    elif 45 < duration <= 60:
-        score += 8
-
-    elif duration > 90:
-        score -= 10
-
-    # Titel nur als sehr kleines Signal.
-    title = str(
-        clip.get(
-            "title",
-            "",
-        )
-    ).lower()
-
-    keywords = [
-        "lol",
-        "haha",
-        "wtf",
-        "crazy",
-        "rage",
-        "fail",
-        "eskaliert",
-        "lustig",
-        "lachen",
-        "bruder",
-        "reaktion",
-        "chat",
-    ]
-
-    for keyword in keywords:
-        if keyword in title:
-            score += 2
-
-    return score
 
 
 def main():
+
     print("================================")
-    print("CLIPCRIP2 – KANDIDATENSUCHE")
+    print("CLIPCRIP2 – CANDIDATEN SAMMLER")
     print("================================")
 
     token = get_token()
 
     print(
-        f"Streamer: {BROADCASTER_LOGIN}"
+        f"Twitch-Kanal: {BROADCASTER_LOGIN}"
     )
 
     broadcaster_id = get_broadcaster_id(
@@ -231,17 +151,35 @@ def main():
 
     clips = get_clips(
         token,
-        broadcaster_id,
+        broadcaster_id
     )
 
     print(
-        f"Insgesamt gefunden: "
-        f"{len(clips)}"
+        f"{len(clips)} Twitch-Clips gefunden."
     )
 
     used = load_used()
 
+    print(
+        f"{len(used)} Clips befinden sich "
+        "bereits in der Used-History."
+    )
+
+    # Zuerst nach Twitch-Views sortieren.
+    # Das ist KEINE finale Qualitätsbewertung.
+    # Es sorgt nur dafür, dass gute Kandidaten
+    # weiter oben stehen.
+    clips.sort(
+        key=lambda clip: clip.get(
+            "view_count",
+            0
+        ),
+        reverse=True,
+    )
+
     candidates = []
+
+    seen_ids = set()
 
     for clip in clips:
 
@@ -250,110 +188,137 @@ def main():
         if not clip_id:
             continue
 
-        # Bereits endgültig verwendete Clips NICHT wieder nehmen.
+        # Doppelte IDs innerhalb desselben Laufs verhindern.
+        if clip_id in seen_ids:
+            continue
+
+        seen_ids.add(clip_id)
+
+        # Bereits final verwendete Clips niemals erneut auswählen.
         if clip_id in used:
             continue
 
         duration = float(
             clip.get(
                 "duration",
-                0,
+                0
             )
         )
 
-        # Extrem kurze Clips raus.
+        # Extrem kurze Clips sind für unsere Verarbeitung
+        # normalerweise nicht sinnvoll.
         if duration < 8:
             continue
 
-        # Sehr lange Clips nicht komplett ausschließen,
-        # aber deutlich nach hinten sortieren.
-        score = calculate_candidate_score(
-            clip
-        )
+        title = str(
+            clip.get(
+                "title",
+                ""
+            )
+        ).strip()
+
+        url = clip.get("url")
+
+        if not url:
+            continue
+
+        candidate = {
+            "id": clip_id,
+
+            "title": title,
+
+            "url": url,
+
+            "view_count": int(
+                clip.get(
+                    "view_count",
+                    0
+                )
+            ),
+
+            "creator_name": clip.get(
+                "creator_name",
+                ""
+            ),
+
+            "created_at": clip.get(
+                "created_at",
+                ""
+            ),
+
+            "duration": duration,
+
+            "broadcaster_name": clip.get(
+                "broadcaster_name",
+                BROADCASTER_LOGIN
+            ),
+
+            # Wichtig für spätere Qualitätskontrolle.
+            "source": "twitch",
+
+            "selected_by": "candidate_pool",
+        }
 
         candidates.append(
-            {
-                "id": clip_id,
-                "title": clip.get(
-                    "title",
-                    "",
-                ),
-                "url": clip.get(
-                    "url",
-                    "",
-                ),
-                "view_count": int(
-                    clip.get(
-                        "view_count",
-                        0,
-                    )
-                ),
-                "duration": duration,
-                "creator_name": clip.get(
-                    "creator_name",
-                    "",
-                ),
-                "created_at": clip.get(
-                    "created_at",
-                    "",
-                ),
-                "thumbnail_url": clip.get(
-                    "thumbnail_url",
-                    "",
-                ),
-                "candidate_score": score,
-            }
+            candidate
         )
 
-    candidates.sort(
-        key=lambda x: x["candidate_score"],
-        reverse=True,
+        if len(candidates) >= KANDIDATEN_ANZAHL:
+            break
+
+    save_candidates(
+        candidates
     )
-
-    # 40 Kandidaten an Download/QC weitergeben.
-    selected_candidates = candidates[
-        :KANDIDATEN_ANZAHL
-    ]
-
-    with open(
-        "clips_today.json",
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            selected_candidates,
-            file,
-            indent=2,
-            ensure_ascii=False,
-        )
 
     print("")
     print("================================")
     print(
-        f"{len(selected_candidates)} "
-        "KANDIDATEN AUSGEWÄHLT"
+        f"{len(candidates)} FRISCHE "
+        "KANDIDATEN GESPEICHERT"
     )
     print("================================")
 
+    if not candidates:
+
+        print(
+            "KEINE NEUEN KANDIDATEN GEFUNDEN."
+        )
+
+        print(
+            "Die Quality-Control wird "
+            "deshalb nicht gestartet werden "
+            "können."
+        )
+
+        # Absichtlich KEINEN used-Eintrag verändern.
+        # Wir wollen niemals einen Clip als benutzt
+        # markieren, bevor er tatsächlich ausgewählt
+        # und verarbeitet wurde.
+        raise RuntimeError(
+            "Keine neuen Twitch-Clips verfügbar."
+        )
+
     for number, clip in enumerate(
-        selected_candidates,
-        start=1,
+        candidates,
+        start=1
     ):
+
         print(
             f"{number:02d}. "
             f"{clip['title']} | "
-            f"{clip['view_count']} Views | "
-            f"{clip['duration']:.1f}s"
+            f"{clip['duration']:.1f}s | "
+            f"{clip['view_count']} Views"
         )
 
     print("")
     print(
-        "WICHTIG: Kandidaten werden "
+        "WICHTIG: Diese Clips wurden "
         "NOCH NICHT als benutzt markiert."
     )
+
     print(
-        "Das passiert erst nach erfolgreicher "
-        "Qualitätskontrolle."
+        "Die endgültige Auswahl übernimmt "
+        "die Quality-Control."
     )
 
 
