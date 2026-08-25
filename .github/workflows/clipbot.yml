@@ -1,34 +1,41 @@
 name: ClipCrip2 Bot
-
 on:
   workflow_dispatch:
-
   schedule:
     - cron: "0 8 * * *"
-
+# Verhindert, dass zwei Läufe gleichzeitig dieselben Dateien
+# und used_clips.json bearbeiten.
+concurrency:
+  group: clipcrip2-bot
+  cancel-in-progress: false
+permissions:
+  contents: write
 jobs:
-
   clips-holen:
-
     runs-on: ubuntu-latest
-
     steps:
-
+      # ==========================================
+      # REPOSITORY
+      # ==========================================
       - name: Repository laden
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+      # ==========================================
+      # PYTHON
+      # ==========================================
       - name: Python einrichten
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
+      # ==========================================
+      # ABHÄNGIGKEITEN
+      # ==========================================
       - name: Abhängigkeiten installieren
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-
+          python -m pip install --upgrade pip
           pip install \
             requests \
             yt-dlp \
@@ -36,43 +43,55 @@ jobs:
             ultralytics \
             opencv-python-headless \
             numpy
-
+      # ==========================================
+      # 1. TWITCH CLIPS FINDEN
+      # ==========================================
       - name: Twitch Clips finden
         env:
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
           TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
         run: |
           python scripts/get_clips.py
-
+      # ==========================================
+      # 2. CLIPS HERUNTERLADEN
+      # ==========================================
       - name: Twitch Clips herunterladen
         run: |
           python scripts/download_clips.py
-
+      # ==========================================
+      # 3. MULTI-STAGE QUALITY CONTROL
+      # ==========================================
       - name: Multi-Stage Quality Control
         run: |
           python scripts/quality_control.py
-
+      # ==========================================
+      # 4. TIKTOK-BEARBEITUNG
+      # ==========================================
       - name: Videos bearbeiten
         run: |
           python scripts/process_clips.py
-
+      # ==========================================
+      # 5. FERTIGE VIDEOS ALS ARTIFACT
+      # ==========================================
       - name: Fertige TikTok Videos speichern
         uses: actions/upload-artifact@v4
         with:
           name: Yussef-TikTok-Clips
           path: tiktok_ready/
           if-no-files-found: error
-
+          retention-days: 7
+      # ==========================================
+      # 6. USED CLIPS SPEICHERN
+      # ==========================================
       - name: Benutzte Clips dauerhaft speichern
         run: |
-
           git config user.name "ClipCrip2 Bot"
           git config user.email "clipcrip2-bot@users.noreply.github.com"
-
           git add used_clips.json clip_history.json
-
-          git diff --cached --quiet || git commit -m "Update used Twitch clips"
-
+          if git diff --cached --quiet; then
+            echo "Keine Änderungen an der Clip-Historie."
+            exit 0
+          fi
+          git commit -m "Update used Twitch clips"
           git pull --rebase origin main
-
           git push origin main
