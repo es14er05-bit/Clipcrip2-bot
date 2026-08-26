@@ -30,6 +30,21 @@ YOLO_MODEL = None
 
 
 # =========================================================
+# LANGWEILIGKEITS-FILTER
+# =========================================================
+
+# Wenn Bild UND Audio praktisch keine Reaktion zeigen,
+# wird der Clip hart abgelehnt.
+BORING_MOTION_PEAK = 8.0
+BORING_AUDIO_PEAKINESS = 0.32
+BORING_AUDIO_ENERGY = 0.42
+
+# Noch strenger für extrem statische Clips.
+VERY_BORING_MOTION_PEAK = 4.5
+VERY_BORING_AUDIO_PEAKINESS = 0.42
+
+
+# =========================================================
 # JSON
 # =========================================================
 
@@ -39,14 +54,17 @@ def load_json(filename, default):
         return default
 
     try:
+
         with open(
             filename,
             "r",
             encoding="utf-8"
         ) as file:
+
             return json.load(file)
 
     except Exception:
+
         return default
 
 
@@ -185,6 +203,7 @@ def get_yolo():
         return YOLO_MODEL
 
     try:
+
         from ultralytics import YOLO
 
         print(
@@ -234,6 +253,7 @@ def person_analysis(frames):
         best = None
 
         try:
+
             results = model(
                 frame,
                 verbose=False
@@ -277,6 +297,7 @@ def person_analysis(frames):
                     best is None
                     or area > best["area"]
                 ):
+
                     best = {
                         "area": area,
                         "center_x":
@@ -291,8 +312,13 @@ def person_analysis(frames):
             / (width * height)
         )
 
-        detections.append(best)
-        sizes.append(area_ratio)
+        detections.append(
+            best
+        )
+
+        sizes.append(
+            area_ratio
+        )
 
         centers.append(
             best["center_x"]
@@ -394,7 +420,6 @@ def motion_analysis(frames):
         }
 
     values = []
-
     previous = None
 
     for frame in frames:
@@ -547,7 +572,6 @@ def audio_analysis(path):
         samples /= 32768.0
 
         window = 4000
-
         rms_values = []
 
         for start in range(
@@ -772,7 +796,6 @@ def create_signature(frames):
 
 # =========================================================
 # SIGNATURE DISTANCE
-# KOMPATIBEL MIT ALTEN + NEUEN SIGNATUREN
 # =========================================================
 
 def signature_distance(
@@ -1009,6 +1032,92 @@ def signature_from_json(entry):
 
 
 # =========================================================
+# BOREDOM / ENGAGEMENT CHECK
+# =========================================================
+
+def is_boring_result(result):
+
+    """
+    HARTE SPERRE für Clips, in denen einfach nur
+    normal geredet wird und visuell/audioseitig
+    praktisch nichts passiert.
+
+    Wichtig:
+    Ein Crashout im Hintergrund kann trotzdem
+    durchkommen, weil dann Audio Peakiness und/oder
+    Motion deutlich höher sind.
+    """
+
+    motion_peak = float(
+        result[
+            "motion"
+        ].get(
+            "peak",
+            0
+        )
+    )
+
+    motion_average = float(
+        result[
+            "motion"
+        ].get(
+            "average",
+            0
+        )
+    )
+
+    audio_peakiness = float(
+        result[
+            "audio"
+        ].get(
+            "peakiness",
+            0
+        )
+    )
+
+    audio_energy = float(
+        result[
+            "audio"
+        ].get(
+            "energy",
+            0
+        )
+    )
+
+    # ---------------------------------------------
+    # NORMALER LANGWEILIGKEITS-FALL
+    # ---------------------------------------------
+
+    if (
+        motion_peak
+        < BORING_MOTION_PEAK
+        and audio_peakiness
+        < BORING_AUDIO_PEAKINESS
+        and audio_energy
+        < BORING_AUDIO_ENERGY
+    ):
+
+        return True
+
+    # ---------------------------------------------
+    # EXTREM STATISCH:
+    # selbst etwas Audio reicht hier nicht.
+    # ---------------------------------------------
+
+    if (
+        motion_peak
+        < VERY_BORING_MOTION_PEAK
+        and motion_average < 2.2
+        and audio_peakiness
+        < VERY_BORING_AUDIO_PEAKINESS
+    ):
+
+        return True
+
+    return False
+
+
+# =========================================================
 # COMPLETE ANALYSIS
 # =========================================================
 
@@ -1053,8 +1162,11 @@ def analyze_video(
     )
 
     score = 0
-
     warnings = []
+
+    # =====================================================
+    # PERSON
+    # =====================================================
 
     score += (
         human_visibility
@@ -1071,6 +1183,10 @@ def analyze_video(
         * 8
     )
 
+    # =====================================================
+    # AUDIO
+    # =====================================================
+
     score += (
         audio["peakiness"]
         * 13
@@ -1080,6 +1196,10 @@ def analyze_video(
         audio["energy"]
         * 5
     )
+
+    # =====================================================
+    # MOTION
+    # =====================================================
 
     motion_interest = min(
         1.0,
@@ -1091,6 +1211,10 @@ def analyze_video(
         * 4
     )
 
+    # =====================================================
+    # METADATA
+    # =====================================================
+
     score += title_score(
         metadata
     )
@@ -1098,6 +1222,10 @@ def analyze_video(
     score += view_score(
         metadata
     )
+
+    # =====================================================
+    # DURATION
+    # =====================================================
 
     duration = info[
         "duration"
@@ -1112,6 +1240,10 @@ def analyze_video(
     elif duration > 90:
         score -= 10
 
+    # =====================================================
+    # SHARPNESS
+    # =====================================================
+
     if sharpness < 45:
 
         score -= 8
@@ -1119,6 +1251,10 @@ def analyze_video(
         warnings.append(
             "unscharf"
         )
+
+    # =====================================================
+    # PERSON STRAFEN
+    # =====================================================
 
     if human_visibility < 0.06:
 
@@ -1144,6 +1280,10 @@ def analyze_video(
             "Jussef eher klein"
         )
 
+    # =====================================================
+    # GAMEPLAY OHNE REAKTION
+    # =====================================================
+
     if (
         human_visibility < 0.12
         and motion["peak"] > 12
@@ -1154,6 +1294,10 @@ def analyze_video(
         warnings.append(
             "Gameplay-Action ohne sichtbare Reaktion"
         )
+
+    # =====================================================
+    # INTERESSANTES AUDIO TROTZ KLEINER PERSON
+    # =====================================================
 
     if (
         human_visibility < 0.10
@@ -1166,32 +1310,86 @@ def analyze_video(
             "Audio interessant, Person fehlt"
         )
 
+    # =====================================================
+    # ALTE LANGWEILIGKEITS-STRAFE
+    # =====================================================
+
     if (
         motion["average"] < 2.0
         and audio["peakiness"] < 0.25
     ):
 
-        score -= 12
+        score -= 20
 
         warnings.append(
             "wenig passiert"
         )
 
-    return {
-        "path": path,
-        "metadata": metadata,
-        "info": info,
-        "person": person,
+    result = {
+        "path":
+            path,
+
+        "metadata":
+            metadata,
+
+        "info":
+            info,
+
+        "person":
+            person,
+
         "human_visibility":
             human_visibility,
-        "motion": motion,
-        "audio": audio,
-        "sharpness": sharpness,
-        "score": float(score),
-        "warnings": warnings,
+
+        "motion":
+            motion,
+
+        "audio":
+            audio,
+
+        "sharpness":
+            sharpness,
+
+        "score":
+            float(score),
+
+        "warnings":
+            warnings,
+
         "signature":
-            create_signature(frames),
+            create_signature(
+                frames
+            ),
     }
+
+    # =====================================================
+    # HARTE LANGWEILIGKEITS-SPERRE
+    # =====================================================
+
+    boring = is_boring_result(
+        result
+    )
+
+    result[
+        "boring"
+    ] = boring
+
+    if boring:
+
+        result[
+            "warnings"
+        ].append(
+            "HARD REJECT: Clip zu langweilig"
+        )
+
+        # Score zusätzlich massiv runter,
+        # damit der Clip auch in der Rangliste
+        # sofort erkennbar ist.
+        result[
+            "score"
+        ] -= 100
+
+    return result
 
 
 # =========================================================
@@ -1328,6 +1526,56 @@ def is_duplicate(
 
 
 # =========================================================
+# KANDIDAT DARF AUSGEWÄHLT WERDEN?
+# =========================================================
+
+def candidate_allowed(
+    candidate,
+    selected,
+    history,
+    minimum_score=None
+):
+
+    if candidate.get(
+        "boring",
+        False
+    ):
+
+        print(
+            "LANGWEILIGER CLIP BLOCKIERT: "
+            + str(
+                candidate[
+                    "metadata"
+                ].get(
+                    "title",
+                    ""
+                )
+            )
+        )
+
+        return False
+
+    if (
+        minimum_score is not None
+        and candidate[
+            "score"
+        ] < minimum_score
+    ):
+
+        return False
+
+    if is_duplicate(
+        candidate,
+        selected,
+        history
+    ):
+
+        return False
+
+    return True
+
+
+# =========================================================
 # MAIN
 # =========================================================
 
@@ -1339,7 +1587,7 @@ def main():
     )
 
     print(
-        "CLIPCRIP2 QUALITY CONTROL V2.3"
+        "CLIPCRIP2 QUALITY CONTROL V2.4"
     )
 
     print(
@@ -1352,6 +1600,10 @@ def main():
 
     print(
         "Legacy-Signaturen: KOMPATIBEL"
+    )
+
+    print(
+        "Hard-Boredom-Filter: AKTIV"
     )
 
     # =====================================================
@@ -1372,15 +1624,11 @@ def main():
 
         if os.path.isfile(old):
 
-            os.remove(
-                old
-            )
+            os.remove(old)
 
         elif os.path.isdir(old):
 
-            shutil.rmtree(
-                old
-            )
+            shutil.rmtree(old)
 
     print(
         f"Output-Ordner bereit: "
@@ -1429,7 +1677,9 @@ def main():
     history_with_signatures = sum(
         1
         for entry in history.values()
-        if signature_from_json(entry)
+        if signature_from_json(
+            entry
+        )
     )
 
     print(
@@ -1474,7 +1724,9 @@ def main():
         )
 
     video_files = sorted(
-        set(video_files)
+        set(
+            video_files
+        )
     )
 
     print(
@@ -1488,7 +1740,8 @@ def main():
     if not video_files:
 
         raise RuntimeError(
-            "downloaded_clips enthält keine Videos."
+            "downloaded_clips enthält "
+            "keine Videos."
         )
 
     # =====================================================
@@ -1520,7 +1773,8 @@ def main():
         except Exception:
 
             print(
-                f"Übersprungen: Dateiname nicht erkannt: "
+                f"Übersprungen: "
+                f"Dateiname nicht erkannt: "
                 f"{filename}"
             )
 
@@ -1534,7 +1788,8 @@ def main():
         ):
 
             print(
-                f"Übersprungen: Kein Metadata-Eintrag "
+                f"Übersprungen: "
+                f"Kein Metadata-Eintrag "
                 f"für {filename}"
             )
 
@@ -1602,8 +1857,27 @@ def main():
         )
 
         print(
+            "Audio energy: "
+            f"{result['audio']['energy']:.2f}"
+        )
+
+        print(
+            "Motion average: "
+            f"{result['motion']['average']:.1f}"
+        )
+
+        print(
             "Motion peak: "
             f"{result['motion']['peak']:.1f}"
+        )
+
+        print(
+            "Boring: "
+            + (
+                "JA"
+                if result["boring"]
+                else "NEIN"
+            )
         )
 
         if result["warnings"]:
@@ -1651,11 +1925,21 @@ def main():
         start=1
     ):
 
+        boring_text = (
+            " | BORING"
+            if item.get(
+                "boring",
+                False
+            )
+            else ""
+        )
+
         print(
             f"{index:02d}. "
             f"{item['score']:.1f} | "
             f"HUMAN "
-            f"{item['human_visibility']:.2f} | "
+            f"{item['human_visibility']:.2f}"
+            f"{boring_text} | "
             f"{item['metadata'].get('title', '')}"
         )
 
@@ -1667,16 +1951,11 @@ def main():
 
     for candidate in analyzed:
 
-        if (
-            candidate["score"]
-            < GOOD_SCORE
-        ):
-            continue
-
-        if is_duplicate(
+        if not candidate_allowed(
             candidate,
             selected,
-            history
+            history,
+            minimum_score=GOOD_SCORE
         ):
             continue
 
@@ -1704,16 +1983,12 @@ def main():
             if candidate in selected:
                 continue
 
-            if (
-                candidate["score"]
-                < HARD_MIN_SCORE
-            ):
-                continue
-
-            if is_duplicate(
+            if not candidate_allowed(
                 candidate,
                 selected,
-                history
+                history,
+                minimum_score=
+                    HARD_MIN_SCORE
             ):
                 continue
 
@@ -1729,6 +2004,10 @@ def main():
 
     # =====================================================
     # FINALER FALLBACK
+    #
+    # WICHTIG:
+    # Auch im Fallback werden LANGWEILIGE CLIPS
+    # NICHT mehr zugelassen.
     # =====================================================
 
     if (
@@ -1739,6 +2018,12 @@ def main():
         for candidate in analyzed:
 
             if candidate in selected:
+                continue
+
+            if candidate.get(
+                "boring",
+                False
+            ):
                 continue
 
             if is_duplicate(
@@ -1765,9 +2050,8 @@ def main():
 
         raise RuntimeError(
             f"Nur {len(selected)} "
-            "unterschiedliche und "
-            "noch nicht verwendete "
-            "Szenen gefunden."
+            "gute, unterschiedliche und "
+            "nicht langweilige Clips gefunden."
         )
 
     # =====================================================
@@ -1786,7 +2070,8 @@ def main():
         loaded_used = []
 
     used = set(
-        loaded_used
+        str(item)
+        for item in loaded_used
     )
 
     final_metadata = []
@@ -1805,7 +2090,7 @@ def main():
     )
 
     # =====================================================
-    # 5 DATEIEN TATSÄCHLICH NACH selected_clips SCHREIBEN
+    # 5 DATEIEN NACH selected_clips
     # =====================================================
 
     for number, candidate in enumerate(
@@ -1827,7 +2112,8 @@ def main():
         ):
 
             raise RuntimeError(
-                f"Quelldatei fehlt: {source}"
+                f"Quelldatei fehlt: "
+                f"{source}"
             )
 
         shutil.copy2(
@@ -1908,6 +2194,23 @@ def main():
                     ]
                 ),
 
+            # ---------------------------------------------
+            # NEU:
+            # Twitch Stream/VOD + Position dauerhaft
+            # speichern.
+            # ---------------------------------------------
+
+            "video_id":
+                metadata.get(
+                    "video_id",
+                    ""
+                ),
+
+            "vod_offset":
+                metadata.get(
+                    "vod_offset"
+                ),
+
             "quality_score":
                 candidate[
                     "score"
@@ -1938,6 +2241,33 @@ def main():
                 ][
                     "peakiness"
                 ],
+
+            "audio_energy":
+                candidate[
+                    "audio"
+                ][
+                    "energy"
+                ],
+
+            "motion_average":
+                candidate[
+                    "motion"
+                ][
+                    "average"
+                ],
+
+            "motion_peak":
+                candidate[
+                    "motion"
+                ][
+                    "peak"
+                ],
+
+            "signature_version":
+                2,
+
+            "signature_size":
+                24,
 
             "signatures":
                 signature_to_json(
@@ -1976,6 +2306,11 @@ def main():
         )
 
         print(
+            "Motion: "
+            f"{candidate['motion']['peak']:.1f}"
+        )
+
+        print(
             "Gespeichert: "
             f"{destination}"
         )
@@ -1985,13 +2320,32 @@ def main():
             f"{destination_size / 1024 / 1024:.2f} MB"
         )
 
+        video_id = metadata.get(
+            "video_id",
+            ""
+        )
+
+        vod_offset = metadata.get(
+            "vod_offset"
+        )
+
+        if (
+            video_id
+            and vod_offset is not None
+        ):
+
+            print(
+                "VOD-Position gespeichert: "
+                f"{video_id} @ "
+                f"{vod_offset}s"
+            )
+
         print(
-            "Signatur dauerhaft gespeichert: JA"
+            "Visuelle Signatur gespeichert: JA"
         )
 
     # =====================================================
-    # KRITISCHE VALIDIERUNG:
-    # selected_clips MUSS EXAKT 5 MP4s HABEN
+    # SELECTED CLIPS VALIDIEREN
     # =====================================================
 
     final_files = sorted(
@@ -2061,7 +2415,9 @@ def main():
     save_json(
         USED_FILE,
         sorted(
-            list(used)
+            list(
+                used
+            )
         )
     )
 
@@ -2076,7 +2432,7 @@ def main():
     )
 
     print(
-        "QUALITY CONTROL V2.3 FERTIG"
+        "QUALITY CONTROL V2.4 FERTIG"
     )
 
     print(
@@ -2084,15 +2440,20 @@ def main():
     )
 
     print(
+        "Langweilige Clips wurden "
+        "hart aussortiert."
+    )
+
+    print(
         "5 Dateien nach selected_clips geschrieben."
     )
 
     print(
-        "Alle 5 visuellen Signaturen gespeichert."
+        "Visuelle Signaturen gespeichert."
     )
 
     print(
-        "Alte und neue Signaturgrößen kompatibel."
+        "VOD-Positionen gespeichert."
     )
 
     print(
