@@ -1,10 +1,20 @@
 from pathlib import Path
+import datetime
 import importlib.util
+
+import requests
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ROHAT_ROOT = REPO_ROOT / "rohat"
 CORE_FILE = REPO_ROOT / "scripts" / "get_clips.py"
+
+
+ROHAT_LOGIN = "xrohat"
+
+ROHAT_SEARCH_DAYS = 365
+
+MAX_PAGES = 10
 
 
 def load_core():
@@ -24,6 +34,235 @@ def load_core():
     return module
 
 
+def get_rohat_clips(
+    core,
+    token,
+    broadcaster_id,
+):
+    headers = {
+        "Client-Id":
+            core.CLIENT_ID,
+
+        "Authorization":
+            f"Bearer {token}",
+    }
+
+    now = datetime.datetime.now(
+        datetime.timezone.utc
+    )
+
+    since = (
+        now
+        - datetime.timedelta(
+            days=ROHAT_SEARCH_DAYS
+        )
+    )
+
+    started_at = (
+        since
+        .isoformat()
+        .replace(
+            "+00:00",
+            "Z"
+        )
+    )
+
+    ended_at = (
+        now
+        .isoformat()
+        .replace(
+            "+00:00",
+            "Z"
+        )
+    )
+
+    clips = []
+
+    cursor = None
+    page = 1
+
+    print("")
+    print(
+        "Rohat Twitch-Abfrage:"
+    )
+    print(
+        f"Zeitraum: letzte "
+        f"{ROHAT_SEARCH_DAYS} Tage"
+    )
+    print(
+        f"started_at: {started_at}"
+    )
+    print(
+        f"ended_at:   {ended_at}"
+    )
+    print("")
+
+    while True:
+        params = {
+            "broadcaster_id":
+                broadcaster_id,
+
+            "started_at":
+                started_at,
+
+            "ended_at":
+                ended_at,
+
+            "first":
+                100,
+        }
+
+        if cursor:
+            params["after"] = cursor
+
+        print(
+            f"Rohat Twitch-Seite "
+            f"{page} wird geladen..."
+        )
+
+        response = requests.get(
+            "https://api.twitch.tv/helix/clips",
+            params=params,
+            headers=headers,
+            timeout=30,
+        )
+
+        response.raise_for_status()
+
+        result = response.json()
+
+        page_clips = result.get(
+            "data",
+            []
+        )
+
+        clips.extend(
+            page_clips
+        )
+
+        print(
+            f"{len(page_clips)} Clips "
+            f"auf Seite {page}."
+        )
+
+        pagination = result.get(
+            "pagination",
+            {}
+        )
+
+        cursor = pagination.get(
+            "cursor"
+        )
+
+        if not cursor:
+            break
+
+        if page >= MAX_PAGES:
+            print(
+                "Maximale Anzahl von "
+                f"{MAX_PAGES} Seiten erreicht."
+            )
+            break
+
+        page += 1
+
+    print("")
+    print(
+        f"{len(clips)} Rohat-Clips "
+        "im 365-Tage-Zeitraum gefunden."
+    )
+
+    if clips:
+        return clips
+
+    print("")
+    print(
+        "WARNUNG: Zeitfilter lieferte "
+        "0 Clips."
+    )
+
+    print(
+        "Starte Twitch-Fallback ohne "
+        "Datumsfilter..."
+    )
+
+    clips = []
+
+    cursor = None
+    page = 1
+
+    while True:
+        params = {
+            "broadcaster_id":
+                broadcaster_id,
+
+            "first":
+                100,
+        }
+
+        if cursor:
+            params["after"] = cursor
+
+        print(
+            f"Fallback Twitch-Seite "
+            f"{page} wird geladen..."
+        )
+
+        response = requests.get(
+            "https://api.twitch.tv/helix/clips",
+            params=params,
+            headers=headers,
+            timeout=30,
+        )
+
+        response.raise_for_status()
+
+        result = response.json()
+
+        page_clips = result.get(
+            "data",
+            []
+        )
+
+        clips.extend(
+            page_clips
+        )
+
+        print(
+            f"{len(page_clips)} Clips "
+            f"auf Fallback-Seite {page}."
+        )
+
+        pagination = result.get(
+            "pagination",
+            {}
+        )
+
+        cursor = pagination.get(
+            "cursor"
+        )
+
+        if not cursor:
+            break
+
+        if page >= MAX_PAGES:
+            print(
+                "Fallback-Limit von "
+                f"{MAX_PAGES} Seiten erreicht."
+            )
+            break
+
+        page += 1
+
+    print("")
+    print(
+        f"{len(clips)} Rohat-Clips "
+        "über Fallback gefunden."
+    )
+
+    return clips
+
+
 def main():
     ROHAT_ROOT.mkdir(
         parents=True,
@@ -32,21 +271,65 @@ def main():
 
     core = load_core()
 
-    core.BROADCASTER_LOGIN = "xrohat"
+    core.BROADCASTER_LOGIN = (
+        ROHAT_LOGIN
+    )
 
     core.USED_FILE = str(
-        ROHAT_ROOT / "used_clips.json"
+        ROHAT_ROOT
+        / "used_clips.json"
     )
 
     core.OUTPUT_FILE = str(
-        ROHAT_ROOT / "clips_today.json"
+        ROHAT_ROOT
+        / "clips_today.json"
+    )
+
+    core.SUCHZEITRAUM_TAGE = (
+        ROHAT_SEARCH_DAYS
+    )
+
+    original_get_all_clips = (
+        core.get_all_clips
+    )
+
+    def rohat_get_all_clips(
+        token,
+        broadcaster_id,
+    ):
+        return get_rohat_clips(
+            core,
+            token,
+            broadcaster_id,
+        )
+
+    core.get_all_clips = (
+        rohat_get_all_clips
     )
 
     print("")
-    print("================================")
-    print("CLIPCRIP4 – ROHAT")
-    print("================================")
-    print("Twitch: xrohat")
+    print(
+        "================================"
+    )
+    print(
+        "CLIPCRIP4 – ROHAT"
+    )
+    print(
+        "================================"
+    )
+
+    print(
+        "Twitch: xrohat"
+    )
+
+    print(
+        "TikTok: @clipcrip4"
+    )
+
+    print(
+        "Suchzeitraum: "
+        f"{ROHAT_SEARCH_DAYS} Tage"
+    )
 
     print(
         "Eigene Used-History: "
@@ -58,9 +341,25 @@ def main():
         + core.OUTPUT_FILE
     )
 
+    print(
+        "Twitch-Fix: started_at "
+        "+ ended_at aktiviert"
+    )
+
+    print(
+        "Fallback ohne Datumsfilter: "
+        "aktiviert"
+    )
+
     print("")
 
-    core.main()
+    try:
+        core.main()
+
+    finally:
+        core.get_all_clips = (
+            original_get_all_clips
+        )
 
 
 if __name__ == "__main__":
