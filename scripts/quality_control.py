@@ -21,7 +21,9 @@ FINAL_COUNT = 5
 GOOD_SCORE = 48
 HARD_MIN_SCORE = 18
 
+# Je kleiner, desto ähnlicher müssen zwei Clips sein.
 DUPLICATE_THRESHOLD = 0.115
+
 SAMPLE_COUNT = 18
 
 YOLO_MODEL_NAME = "yolo11n.pt"
@@ -38,15 +40,28 @@ def load_json(filename, default):
         return default
 
     try:
-        with open(filename, "r", encoding="utf-8") as file:
+
+        with open(
+            filename,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
             return json.load(file)
+
     except Exception:
+
         return default
 
 
 def save_json(filename, data):
 
-    with open(filename, "w", encoding="utf-8") as file:
+    with open(
+        filename,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
         json.dump(
             data,
             file,
@@ -66,17 +81,40 @@ def get_video_info(path):
     if not cap.isOpened():
         return None
 
-    frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = float(cap.get(cv2.CAP_PROP_FPS))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frames = int(
+        cap.get(
+            cv2.CAP_PROP_FRAME_COUNT
+        )
+    )
+
+    fps = float(
+        cap.get(
+            cv2.CAP_PROP_FPS
+        )
+    )
+
+    width = int(
+        cap.get(
+            cv2.CAP_PROP_FRAME_WIDTH
+        )
+    )
+
+    height = int(
+        cap.get(
+            cv2.CAP_PROP_FRAME_HEIGHT
+        )
+    )
 
     cap.release()
 
     if fps <= 0:
         fps = 30
 
-    if frames <= 0 or width <= 0 or height <= 0:
+    if (
+        frames <= 0
+        or width <= 0
+        or height <= 0
+    ):
         return None
 
     return {
@@ -92,7 +130,10 @@ def get_video_info(path):
 # SAMPLE FRAMES
 # =========================================================
 
-def read_sample_frames(path, count=SAMPLE_COUNT):
+def read_sample_frames(
+    path,
+    count=SAMPLE_COUNT
+):
 
     info = get_video_info(path)
 
@@ -121,7 +162,10 @@ def read_sample_frames(path, count=SAMPLE_COUNT):
         success, frame = cap.read()
 
         if success:
-            frames.append(frame)
+
+            frames.append(
+                frame
+            )
 
     cap.release()
 
@@ -140,9 +184,12 @@ def get_yolo():
         return YOLO_MODEL
 
     try:
+
         from ultralytics import YOLO
 
-        print("YOLO-Modell wird geladen...")
+        print(
+            "YOLO-Modell wird geladen..."
+        )
 
         YOLO_MODEL = YOLO(
             YOLO_MODEL_NAME
@@ -168,6 +215,7 @@ def person_analysis(frames):
     model = get_yolo()
 
     if model is None or not frames:
+
         return {
             "presence": 0.0,
             "size": 0.0,
@@ -186,11 +234,14 @@ def person_analysis(frames):
         best = None
 
         try:
+
             results = model(
                 frame,
                 verbose=False
             )
+
         except Exception:
+
             continue
 
         for result in results:
@@ -228,6 +279,7 @@ def person_analysis(frames):
                     best is None
                     or area > best["area"]
                 ):
+
                     best = {
                         "area": area,
                         "center_x":
@@ -242,7 +294,9 @@ def person_analysis(frames):
             / (width * height)
         )
 
-        detections.append(best)
+        detections.append(
+            best
+        )
 
         sizes.append(
             area_ratio
@@ -255,33 +309,46 @@ def person_analysis(frames):
 
     presence = (
         len(detections)
-        / max(len(frames), 1)
+        / max(
+            len(frames),
+            1
+        )
     )
 
     average_size = (
-        float(np.mean(sizes))
+        float(
+            np.mean(sizes)
+        )
         if sizes
         else 0.0
     )
 
     largest = (
-        float(np.max(sizes))
+        float(
+            np.max(sizes)
+        )
         if sizes
         else 0.0
     )
 
     if average_size >= 0.12:
         size_score = 1.0
+
     elif average_size >= 0.06:
         size_score = 0.9
+
     elif average_size >= 0.03:
         size_score = 0.72
+
     elif average_size >= 0.015:
         size_score = 0.52
+
     elif average_size >= 0.006:
         size_score = 0.32
+
     elif average_size > 0:
         size_score = 0.12
+
     else:
         size_score = 0.0
 
@@ -289,23 +356,36 @@ def person_analysis(frames):
 
         diffs = np.abs(
             np.diff(
-                np.array(centers)
+                np.array(
+                    centers
+                )
             )
         )
 
         movement = min(
             1.0,
-            float(np.mean(diffs) * 7)
+            float(
+                np.mean(diffs)
+                * 7
+            )
         )
 
     else:
+
         movement = 0.0
 
     return {
-        "presence": float(presence),
-        "size": float(size_score),
-        "movement": float(movement),
-        "largest": float(largest),
+        "presence":
+            float(presence),
+
+        "size":
+            float(size_score),
+
+        "movement":
+            float(movement),
+
+        "largest":
+            float(largest),
     }
 
 
@@ -316,12 +396,14 @@ def person_analysis(frames):
 def motion_analysis(frames):
 
     if len(frames) < 2:
+
         return {
             "average": 0.0,
             "peak": 0.0,
         }
 
     values = []
+
     previous = None
 
     for frame in frames:
@@ -360,6 +442,7 @@ def motion_analysis(frames):
         previous = gray
 
     if not values:
+
         return {
             "average": 0.0,
             "peak": 0.0,
@@ -367,7 +450,9 @@ def motion_analysis(frames):
 
     return {
         "average":
-            float(np.mean(values)),
+            float(
+                np.mean(values)
+            ),
 
         "peak":
             float(
@@ -446,6 +531,7 @@ def audio_analysis(path):
             result.returncode != 0
             or not result.stdout
         ):
+
             return {
                 "present": 0.0,
                 "energy": 0.0,
@@ -460,6 +546,7 @@ def audio_analysis(path):
         )
 
         if len(samples) < 16000:
+
             return {
                 "present": 0.2,
                 "energy": 0.0,
@@ -469,6 +556,7 @@ def audio_analysis(path):
         samples /= 32768.0
 
         window = 4000
+
         rms_values = []
 
         for start in range(
@@ -485,7 +573,8 @@ def audio_analysis(path):
                 np.sqrt(
                     np.mean(
                         chunk * chunk
-                    ) + 1e-9
+                    )
+                    + 1e-9
                 )
             )
 
@@ -494,6 +583,7 @@ def audio_analysis(path):
             )
 
         if not rms_values:
+
             return {
                 "present": 0.5,
                 "energy": 0.0,
@@ -501,7 +591,9 @@ def audio_analysis(path):
             }
 
         average = float(
-            np.mean(rms_values)
+            np.mean(
+                rms_values
+            )
         )
 
         peak = float(
@@ -512,7 +604,9 @@ def audio_analysis(path):
         )
 
         std = float(
-            np.std(rms_values)
+            np.std(
+                rms_values
+            )
         )
 
         energy = min(
@@ -537,7 +631,7 @@ def audio_analysis(path):
     except Exception as error:
 
         print(
-            f"Audioanalyse Fehler: "
+            "Audioanalyse Fehler: "
             f"{error}"
         )
 
@@ -586,7 +680,9 @@ def title_score(metadata):
     score = 0
 
     for word in strong_words:
+
         if word in title:
+
             score += 2.5
 
     return min(
@@ -598,31 +694,42 @@ def title_score(metadata):
 def view_score(metadata):
 
     try:
+
         views = int(
             metadata.get(
                 "view_count",
                 0
             )
         )
+
     except Exception:
+
         views = 0
 
     if views >= 100000:
         return 10
+
     if views >= 50000:
         return 9
+
     if views >= 20000:
         return 8
+
     if views >= 10000:
         return 7
+
     if views >= 5000:
         return 6
+
     if views >= 2000:
         return 5
+
     if views >= 1000:
         return 4
+
     if views >= 500:
         return 3
+
     if views >= 100:
         return 2
 
@@ -683,6 +790,7 @@ def signature_distance(
         not signature_a
         or not signature_b
     ):
+
         return 999
 
     results = []
@@ -734,6 +842,92 @@ def signature_distance(
 
 
 # =========================================================
+# HISTORY SIGNATURE
+# =========================================================
+
+def signature_to_json(signature):
+
+    result = []
+
+    for hist, image in signature:
+
+        result.append({
+            "hist":
+                hist.astype(
+                    np.float32
+                ).tolist(),
+
+            "image":
+                image.astype(
+                    np.float32
+                ).tolist(),
+        })
+
+    return result
+
+
+def signature_from_json(entry):
+
+    if not isinstance(
+        entry,
+        dict
+    ):
+        return []
+
+    stored = entry.get(
+        "signatures",
+        []
+    )
+
+    if not isinstance(
+        stored,
+        list
+    ):
+        return []
+
+    result = []
+
+    for item in stored:
+
+        if not isinstance(
+            item,
+            dict
+        ):
+            continue
+
+        try:
+
+            hist = np.array(
+                item["hist"],
+                dtype=np.float32
+            )
+
+            image = np.array(
+                item["image"],
+                dtype=np.float32
+            )
+
+            if (
+                hist.size == 0
+                or image.size == 0
+            ):
+                continue
+
+            result.append(
+                (
+                    hist,
+                    image
+                )
+            )
+
+        except Exception:
+
+            continue
+
+    return result
+
+
+# =========================================================
 # COMPLETE ANALYSIS
 # =========================================================
 
@@ -742,7 +936,9 @@ def analyze_video(
     metadata
 ):
 
-    info = get_video_info(path)
+    info = get_video_info(
+        path
+    )
 
     if info is None:
         return None
@@ -776,9 +972,10 @@ def analyze_video(
     )
 
     score = 0
+
     warnings = []
 
-    # Mensch/Jussef bleibt Hauptsignal.
+    # Mensch/Jussef Hauptsignal
     score += (
         human_visibility
         * 48
@@ -794,8 +991,7 @@ def analyze_video(
         * 8
     )
 
-    # Audio-Reaktionen sind wichtig,
-    # aber können Gameplay nie alleine retten.
+    # Audio
     score += (
         audio["peakiness"]
         * 13
@@ -812,7 +1008,8 @@ def analyze_video(
     )
 
     score += (
-        motion_interest * 4
+        motion_interest
+        * 4
     )
 
     score += title_score(
@@ -828,19 +1025,27 @@ def analyze_video(
     ]
 
     if 12 <= duration <= 45:
+
         score += 7
+
     elif 8 <= duration <= 60:
+
         score += 3
+
     elif duration > 90:
+
         score -= 10
 
     if sharpness < 45:
+
         score -= 8
+
         warnings.append(
             "unscharf"
         )
 
     # HARTE STRAFEN
+
     if human_visibility < 0.06:
 
         score -= 38
@@ -919,7 +1124,7 @@ def analyze_video(
 # DUPLICATE CHECK
 # =========================================================
 
-def is_duplicate(
+def is_duplicate_current_run(
     candidate,
     selected
 ):
@@ -935,7 +1140,120 @@ def is_duplicate(
             distance
             < DUPLICATE_THRESHOLD
         ):
+
+            print(
+                "DUPLIKAT IM AKTUELLEN RUN "
+                f"ERKANNT | Abstand: "
+                f"{distance:.4f}"
+            )
+
             return True
+
+    return False
+
+
+def is_duplicate_history(
+    candidate,
+    history
+):
+
+    if not isinstance(
+        history,
+        dict
+    ):
+
+        return False
+
+    for old_clip_id, entry in (
+        history.items()
+    ):
+
+        old_signature = (
+            signature_from_json(
+                entry
+            )
+        )
+
+        # Alte History-Einträge ohne
+        # Signatur einfach überspringen.
+        if not old_signature:
+            continue
+
+        distance = signature_distance(
+            candidate["signature"],
+            old_signature
+        )
+
+        if (
+            distance
+            < DUPLICATE_THRESHOLD
+        ):
+
+            print("")
+            print(
+                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            )
+
+            print(
+                "ALTE SZENE ERKANNT – "
+                "WIRD ÜBERSPRUNGEN"
+            )
+
+            print(
+                "Neuer Clip: "
+                + str(
+                    candidate[
+                        "metadata"
+                    ].get(
+                        "title",
+                        ""
+                    )
+                )
+            )
+
+            print(
+                "Ähnlich zu History-Clip: "
+                + str(
+                    entry.get(
+                        "title",
+                        old_clip_id
+                    )
+                )
+            )
+
+            print(
+                "Abstand: "
+                f"{distance:.4f}"
+            )
+
+            print(
+                "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+            )
+
+            return True
+
+    return False
+
+
+def is_duplicate(
+    candidate,
+    selected,
+    history
+):
+
+    if is_duplicate_current_run(
+        candidate,
+        selected
+    ):
+
+        return True
+
+    if is_duplicate_history(
+        candidate,
+        history
+    ):
+
+        return True
 
     return False
 
@@ -947,16 +1265,21 @@ def is_duplicate(
 def main():
 
     print("")
+
     print(
         "=========================================="
     )
 
     print(
-        "CLIPCRIP2 QUALITY CONTROL V2.1"
+        "CLIPCRIP2 QUALITY CONTROL V2.2"
     )
 
     print(
         "=========================================="
+    )
+
+    print(
+        "History-Duplikaterkennung: AKTIV"
     )
 
     os.makedirs(
@@ -972,7 +1295,10 @@ def main():
     ):
 
         if os.path.isfile(old):
-            os.remove(old)
+
+            os.remove(
+                old
+            )
 
     candidates = load_json(
         INPUT_JSON,
@@ -980,9 +1306,39 @@ def main():
     )
 
     if not candidates:
+
         raise RuntimeError(
             "clips_today.json ist leer."
         )
+
+    # History VOR der Auswahl laden,
+    # damit alte Szenen geprüft werden.
+    history = load_json(
+        HISTORY_FILE,
+        {}
+    )
+
+    if not isinstance(
+        history,
+        dict
+    ):
+
+        history = {}
+
+    history_with_signatures = sum(
+        1
+        for entry in history.values()
+        if signature_from_json(entry)
+    )
+
+    print(
+        f"{len(history)} History-Einträge."
+    )
+
+    print(
+        f"{history_with_signatures} davon "
+        "mit visueller Signatur."
+    )
 
     video_files = []
 
@@ -1021,12 +1377,15 @@ def main():
         )
 
         try:
+
             number = int(
                 filename
                 .split("_")[1]
                 .split(".")[0]
             )
+
         except Exception:
+
             continue
 
         index = number - 1
@@ -1035,6 +1394,7 @@ def main():
             index < 0
             or index >= len(candidates)
         ):
+
             continue
 
         metadata = candidates[
@@ -1042,6 +1402,7 @@ def main():
         ]
 
         print("")
+
         print(
             "------------------------------------------"
         )
@@ -1063,7 +1424,7 @@ def main():
         )
 
         print(
-            f"Score: "
+            "Score: "
             f"{result['score']:.1f}"
         )
 
@@ -1104,17 +1465,19 @@ def main():
             )
 
     if not analyzed:
+
         raise RuntimeError(
             "Kein Video analysiert."
         )
 
     analyzed.sort(
         key=lambda item:
-        item["score"],
+            item["score"],
         reverse=True
     )
 
     print("")
+
     print(
         "=========================================="
     )
@@ -1142,55 +1505,86 @@ def main():
 
     selected = []
 
+    # =====================================================
     # TOP CLIPS
+    # =====================================================
+
     for candidate in analyzed:
 
-        if candidate[
-            "score"
-        ] < GOOD_SCORE:
+        if (
+            candidate["score"]
+            < GOOD_SCORE
+        ):
+
             continue
 
         if is_duplicate(
             candidate,
-            selected
+            selected,
+            history
         ):
+
             continue
 
         selected.append(
             candidate
         )
 
-        if len(selected) >= FINAL_COUNT:
+        if (
+            len(selected)
+            >= FINAL_COUNT
+        ):
+
             break
 
+    # =====================================================
     # BACKUPS
-    if len(selected) < FINAL_COUNT:
+    # =====================================================
+
+    if (
+        len(selected)
+        < FINAL_COUNT
+    ):
 
         for candidate in analyzed:
 
             if candidate in selected:
                 continue
 
-            if candidate[
-                "score"
-            ] < HARD_MIN_SCORE:
+            if (
+                candidate["score"]
+                < HARD_MIN_SCORE
+            ):
+
                 continue
 
             if is_duplicate(
                 candidate,
-                selected
+                selected,
+                history
             ):
+
                 continue
 
             selected.append(
                 candidate
             )
 
-            if len(selected) >= FINAL_COUNT:
+            if (
+                len(selected)
+                >= FINAL_COUNT
+            ):
+
                 break
 
+    # =====================================================
     # FINALER FALLBACK
-    if len(selected) < FINAL_COUNT:
+    # =====================================================
+
+    if (
+        len(selected)
+        < FINAL_COUNT
+    ):
 
         for candidate in analyzed:
 
@@ -1199,22 +1593,33 @@ def main():
 
             if is_duplicate(
                 candidate,
-                selected
+                selected,
+                history
             ):
+
                 continue
 
             selected.append(
                 candidate
             )
 
-            if len(selected) >= FINAL_COUNT:
+            if (
+                len(selected)
+                >= FINAL_COUNT
+            ):
+
                 break
 
-    if len(selected) < FINAL_COUNT:
+    if (
+        len(selected)
+        < FINAL_COUNT
+    ):
 
         raise RuntimeError(
             f"Nur {len(selected)} "
-            f"unterschiedliche Clips gefunden."
+            "unterschiedliche und "
+            "noch nicht verwendete "
+            "Szenen gefunden."
         )
 
     used = set(
@@ -1224,14 +1629,10 @@ def main():
         )
     )
 
-    history = load_json(
-        HISTORY_FILE,
-        {}
-    )
-
     final_metadata = []
 
     print("")
+
     print(
         "=========================================="
     )
@@ -1275,9 +1676,21 @@ def main():
             clip_id
         )
 
+        # =================================================
+        # WICHTIG:
+        # Signatur dauerhaft speichern.
+        # Dadurch kann derselbe Moment bei allen
+        # zukünftigen Runs erkannt werden, selbst
+        # wenn Twitch eine andere Clip-ID vergibt.
+        # =================================================
+
         history[
             clip_id
         ] = {
+
+            "clip_id":
+                clip_id,
+
             "title":
                 metadata.get(
                     "title",
@@ -1293,7 +1706,11 @@ def main():
             "duration":
                 metadata.get(
                     "duration",
-                    0
+                    candidate[
+                        "info"
+                    ][
+                        "duration"
+                    ]
                 ),
 
             "quality_score":
@@ -1326,6 +1743,13 @@ def main():
                 ][
                     "peakiness"
                 ],
+
+            "signatures":
+                signature_to_json(
+                    candidate[
+                        "signature"
+                    ]
+                ),
         }
 
         final_metadata.append(
@@ -1333,6 +1757,7 @@ def main():
         )
 
         print("")
+
         print(
             f"{number}. "
             f"Score "
@@ -1356,6 +1781,14 @@ def main():
             f"{candidate['audio']['peakiness']:.2f}"
         )
 
+        print(
+            "Signatur dauerhaft gespeichert: JA"
+        )
+
+    # =====================================================
+    # SPEICHERN
+    # =====================================================
+
     save_json(
         INPUT_JSON,
         final_metadata
@@ -1374,16 +1807,27 @@ def main():
     )
 
     print("")
+
     print(
         "=========================================="
     )
 
     print(
-        "QUALITY CONTROL V2.1 FERTIG"
+        "QUALITY CONTROL V2.2 FERTIG"
     )
 
     print(
         "5 Clips ausgewählt."
+    )
+
+    print(
+        "Alle 5 visuellen Signaturen "
+        "wurden gespeichert."
+    )
+
+    print(
+        "Zukünftige Runs prüfen gegen "
+        "die komplette History."
     )
 
     print(
