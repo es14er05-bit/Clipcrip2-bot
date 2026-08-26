@@ -16,9 +16,21 @@ KANDIDATEN_ANZAHL = 40
 # unbenutzte Kandidaten vorhanden sind.
 SUCHZEITRAUM_TAGE = 365
 
+# Wenn aus demselben VOD bereits eine Stelle benutzt wurde,
+# wird dieser Bereich davor und danach ebenfalls gesperrt.
+#
+# Beispiel:
+# alter Clip bei Sekunde 5000
+# -> neue Clips zwischen 4940 und 5060 werden blockiert.
+VOD_DUPLICATE_WINDOW_SECONDS = 60
+
 USED_FILE = "used_clips.json"
 OUTPUT_FILE = "clips_today.json"
 
+
+# =========================================================
+# TWITCH TOKEN
+# =========================================================
 
 def get_token():
 
@@ -34,20 +46,28 @@ def get_token():
 
     response.raise_for_status()
 
-    return response.json()["access_token"]
+    return response.json()[
+        "access_token"
+    ]
 
+
+# =========================================================
+# BROADCASTER
+# =========================================================
 
 def get_broadcaster_id(token):
 
     headers = {
         "Client-Id": CLIENT_ID,
-        "Authorization": f"Bearer {token}",
+        "Authorization":
+            f"Bearer {token}",
     }
 
     response = requests.get(
         "https://api.twitch.tv/helix/users",
         params={
-            "login": BROADCASTER_LOGIN
+            "login":
+                BROADCASTER_LOGIN
         },
         headers=headers,
         timeout=30,
@@ -71,6 +91,10 @@ def get_broadcaster_id(token):
     return data[0]["id"]
 
 
+# =========================================================
+# ALLE TWITCH CLIPS
+# =========================================================
+
 def get_all_clips(
     token,
     broadcaster_id
@@ -78,7 +102,8 @@ def get_all_clips(
 
     headers = {
         "Client-Id": CLIENT_ID,
-        "Authorization": f"Bearer {token}",
+        "Authorization":
+            f"Bearer {token}",
     }
 
     since = (
@@ -96,7 +121,6 @@ def get_all_clips(
     clips = []
 
     cursor = None
-
     page = 1
 
     while True:
@@ -113,7 +137,6 @@ def get_all_clips(
         }
 
         if cursor:
-
             params["after"] = cursor
 
         print(
@@ -163,8 +186,8 @@ def get_all_clips(
 
         page += 1
 
-        # Sicherheitslimit.
-        # 20 Seiten = maximal 2000 Clips.
+        # Sicherheitslimit:
+        # maximal 2000 Twitch-Clips.
         if page > 20:
 
             print(
@@ -176,6 +199,10 @@ def get_all_clips(
 
     return clips
 
+
+# =========================================================
+# USED HISTORY
+# =========================================================
 
 def load_used():
 
@@ -203,7 +230,8 @@ def load_used():
             return set()
 
         return set(
-            data
+            str(item)
+            for item in data
         )
 
     except (
@@ -214,6 +242,233 @@ def load_used():
 
         return set()
 
+
+# =========================================================
+# VOD POSITION
+# =========================================================
+
+def get_vod_position(clip):
+
+    """
+    Liefert:
+    (video_id, vod_offset)
+
+    video_id:
+        Twitch VOD / Stream-ID.
+
+    vod_offset:
+        Position des Clips innerhalb des VODs
+        in Sekunden.
+
+    Falls Twitch keine brauchbaren Daten liefert,
+    wird None zurückgegeben.
+    """
+
+    video_id = str(
+        clip.get(
+            "video_id",
+            ""
+        )
+    ).strip()
+
+    raw_offset = clip.get(
+        "vod_offset"
+    )
+
+    if not video_id:
+        return None
+
+    if raw_offset is None:
+        return None
+
+    try:
+
+        vod_offset = int(
+            raw_offset
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return None
+
+    if vod_offset < 0:
+        return None
+
+    return (
+        video_id,
+        vod_offset
+    )
+
+
+# =========================================================
+# BEREITS BENUTZTE VOD-STELLEN AUFBAUEN
+# =========================================================
+
+def build_used_vod_positions(
+    all_clips,
+    used_ids
+):
+
+    """
+    Sehr wichtig:
+
+    used_clips.json enthält alte Twitch-Clip-IDs.
+
+    Da die aktuelle Twitch-Abfrage auch alte Clips liefert,
+    können wir anhand dieser alten IDs herausfinden,
+    aus welchem VOD und von welcher Stelle sie kamen.
+
+    Dadurch können wir auch alte Wiederholungen blockieren,
+    obwohl clip_history.json damals noch keine
+    video_id/vod_offset-Daten gespeichert hat.
+    """
+
+    positions = {}
+
+    matched_used_ids = 0
+
+    for clip in all_clips:
+
+        clip_id = str(
+            clip.get(
+                "id",
+                ""
+            )
+        )
+
+        if (
+            not clip_id
+            or clip_id not in used_ids
+        ):
+            continue
+
+        position = get_vod_position(
+            clip
+        )
+
+        if position is None:
+            continue
+
+        video_id, vod_offset = position
+
+        positions.setdefault(
+            video_id,
+            []
+        ).append(
+            vod_offset
+        )
+
+        matched_used_ids += 1
+
+    # Doppelte Offsets entfernen.
+    for video_id in positions:
+
+        positions[
+            video_id
+        ] = sorted(
+            set(
+                positions[
+                    video_id
+                ]
+            )
+        )
+
+    total_positions = sum(
+        len(values)
+        for values in positions.values()
+    )
+
+    print("")
+    print(
+        "================================"
+    )
+
+    print(
+        "VOD-DUPLIKAT-HISTORY"
+    )
+
+    print(
+        "================================"
+    )
+
+    print(
+        f"{matched_used_ids} alte Used-IDs "
+        "konnten einem Twitch-VOD "
+        "zugeordnet werden."
+    )
+
+    print(
+        f"{total_positions} bereits "
+        "verwendete VOD-Stellen bekannt."
+    )
+
+    print(
+        f"Sperrbereich: +/- "
+        f"{VOD_DUPLICATE_WINDOW_SECONDS} Sekunden."
+    )
+
+    return positions
+
+
+# =========================================================
+# VOD DUPLICATE CHECK
+# =========================================================
+
+def is_used_vod_position(
+    clip,
+    used_vod_positions
+):
+
+    position = get_vod_position(
+        clip
+    )
+
+    if position is None:
+
+        # Wenn Twitch keine VOD-Daten liefert,
+        # greifen weiterhin Clip-ID und später
+        # visuelle Quality-Control.
+        return False
+
+    video_id, vod_offset = position
+
+    old_offsets = (
+        used_vod_positions.get(
+            video_id,
+            []
+        )
+    )
+
+    for old_offset in old_offsets:
+
+        difference = abs(
+            vod_offset
+            - old_offset
+        )
+
+        if (
+            difference
+            <= VOD_DUPLICATE_WINDOW_SECONDS
+        ):
+
+            print(
+                "VOD-DUPLIKAT BLOCKIERT | "
+                f"VOD {video_id} | "
+                f"neu {vod_offset}s | "
+                f"alt {old_offset}s | "
+                f"Abstand {difference}s"
+            )
+
+            return True
+
+    return False
+
+
+# =========================================================
+# OUTPUT
+# =========================================================
 
 def save_candidates(
     candidates
@@ -233,6 +488,10 @@ def save_candidates(
         )
 
 
+# =========================================================
+# MAIN
+# =========================================================
+
 def main():
 
     print(
@@ -240,7 +499,7 @@ def main():
     )
 
     print(
-        "CLIPCRIP2 – CANDIDATEN SAMMLER"
+        "CLIPCRIP2 – CANDIDATEN SAMMLER V2"
     )
 
     print(
@@ -285,9 +544,9 @@ def main():
         f"Used-History."
     )
 
-    # --------------------------------
+    # =====================================================
     # DUPLIKATE AUS API ENTFERNEN
-    # --------------------------------
+    # =====================================================
 
     unique_clips = {}
 
@@ -301,7 +560,7 @@ def main():
             continue
 
         unique_clips[
-            clip_id
+            str(clip_id)
         ] = clip
 
     clips = list(
@@ -313,9 +572,20 @@ def main():
         f"Twitch-Clips."
     )
 
-    # --------------------------------
+    # =====================================================
+    # ALTE VOD-STELLEN REKONSTRUIEREN
+    # =====================================================
+
+    used_vod_positions = (
+        build_used_vod_positions(
+            clips,
+            used
+        )
+    )
+
+    # =====================================================
     # NACH VIEWS SORTIEREN
-    # --------------------------------
+    # =====================================================
 
     clips.sort(
         key=lambda clip: int(
@@ -330,31 +600,47 @@ def main():
     candidates = []
 
     skipped_used = 0
+    skipped_vod_duplicate = 0
     skipped_short = 0
     skipped_invalid = 0
 
-    # --------------------------------
+    # =====================================================
     # KANDIDATEN AUFBAUEN
-    # --------------------------------
+    # =====================================================
 
     for clip in clips:
 
-        clip_id = clip.get(
-            "id"
+        clip_id = str(
+            clip.get(
+                "id",
+                ""
+            )
         )
 
         if not clip_id:
 
             skipped_invalid += 1
-
             continue
 
-        # Bereits final verwendete
-        # Clips niemals wieder nehmen.
+        # -------------------------------------------------
+        # EXAKTE TWITCH CLIP-ID BEREITS BENUTZT
+        # -------------------------------------------------
+
         if clip_id in used:
 
             skipped_used += 1
+            continue
 
+        # -------------------------------------------------
+        # GLEICHE STELLE AUS DEMSELBEN VOD
+        # -------------------------------------------------
+
+        if is_used_vod_position(
+            clip,
+            used_vod_positions
+        ):
+
+            skipped_vod_duplicate += 1
             continue
 
         try:
@@ -372,7 +658,6 @@ def main():
         ):
 
             skipped_invalid += 1
-
             continue
 
         # Zu kurze Clips bringen für
@@ -380,7 +665,6 @@ def main():
         if duration < 8:
 
             skipped_short += 1
-
             continue
 
         url = clip.get(
@@ -390,7 +674,6 @@ def main():
         if not url:
 
             skipped_invalid += 1
-
             continue
 
         title = str(
@@ -399,6 +682,19 @@ def main():
                 ""
             )
         ).strip()
+
+        position = get_vod_position(
+            clip
+        )
+
+        video_id = ""
+        vod_offset = None
+
+        if position is not None:
+
+            video_id, vod_offset = (
+                position
+            )
 
         candidate = {
 
@@ -440,6 +736,18 @@ def main():
                     BROADCASTER_LOGIN
                 ),
 
+            # ---------------------------------------------
+            # NEU:
+            # Stream/VOD + Position für permanente
+            # Wiederholungssperre.
+            # ---------------------------------------------
+
+            "video_id":
+                video_id,
+
+            "vod_offset":
+                vod_offset,
+
             "source":
                 "twitch",
 
@@ -455,12 +763,11 @@ def main():
             len(candidates)
             >= KANDIDATEN_ANZAHL
         ):
-
             break
 
-    # --------------------------------
+    # =====================================================
     # SPEICHERN
-    # --------------------------------
+    # =====================================================
 
     save_candidates(
         candidates
@@ -481,8 +788,13 @@ def main():
     )
 
     print(
-        f"Bereits benutzt: "
+        f"Exakte Clip-ID benutzt: "
         f"{skipped_used}"
+    )
+
+    print(
+        f"Gleiche VOD-Stelle blockiert: "
+        f"{skipped_vod_duplicate}"
     )
 
     print(
@@ -527,11 +839,26 @@ def main():
         start=1
     ):
 
+        vod_text = ""
+
+        if (
+            clip.get("video_id")
+            and clip.get("vod_offset")
+            is not None
+        ):
+
+            vod_text = (
+                f" | VOD "
+                f"{clip['video_id']} "
+                f"@ {clip['vod_offset']}s"
+            )
+
         print(
             f"{number:02d}. "
             f"{clip['title']} | "
             f"{clip['duration']:.1f}s | "
             f"{clip['view_count']} Views"
+            f"{vod_text}"
         )
 
     print("")
@@ -558,13 +885,17 @@ def main():
     )
 
     print(
-        "Die Quality-Control entscheidet "
-        "jetzt über die finalen 5."
+        "Gleicher Stream bleibt erlaubt."
     )
 
     print(
-        "Noch kein Kandidat wurde als "
-        "benutzt markiert."
+        "Bereits verwendete Stellen "
+        "desselben Streams sind gesperrt."
+    )
+
+    print(
+        "Die Quality-Control entscheidet "
+        "jetzt über die finalen 5."
     )
 
 
