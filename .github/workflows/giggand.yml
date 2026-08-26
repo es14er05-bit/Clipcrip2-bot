@@ -1,0 +1,122 @@
+name: ClipCrip5 Giggand Bot
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "40 6 * * *"
+
+concurrency:
+  group: clipcrip5-giggand-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  giggand-clips:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Abhängigkeiten installieren
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+          python -m pip install --upgrade pip
+
+          pip install \
+            requests \
+            yt-dlp \
+            openai-whisper \
+            ultralytics \
+            opencv-python-headless \
+            numpy
+
+      - name: Giggand Twitch Clips finden
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+        run: |
+          python giggand/scripts/get_clips.py
+
+      - name: Giggand Twitch Clips herunterladen
+        run: |
+          python giggand/scripts/download_clips.py
+
+      - name: Giggand Multi-Stage Quality Control
+        run: |
+          python giggand/scripts/quality_control.py
+
+      - name: Giggand TikTok Videos für @clipcrip5 erstellen
+        run: |
+          python giggand/scripts/process_clips.py
+
+      - name: Genau 5 fertige Giggand Videos prüfen
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          files = sorted(
+              Path("giggand/tiktok_ready").glob("*.mp4")
+          )
+
+          print(
+              f"{len(files)} fertige MP4-Dateien gefunden."
+          )
+
+          for file in files:
+              print(file)
+
+          if len(files) != 5:
+              raise SystemExit(
+                  "FEHLER: Es müssen genau 5 fertige "
+                  f"Videos vorhanden sein, gefunden: {len(files)}"
+              )
+          PY
+
+      - name: Giggand TikTok Videos als GitHub Artifact speichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: Giggand-ClipCrip5-TikTok-Clips
+          path: giggand/tiktok_ready/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Giggand Videos zu Google Drive hochladen
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          DRIVE_FOLDER_ID: "1wSmQ5LdHOOvPNKC4QXWMsh-b_ETn1T7V"
+        run: |
+          python giggand/scripts/drive_upload.py
+
+      - name: Giggand Clip History dauerhaft speichern
+        run: |
+          git config user.name "clipcrip5-bot"
+          git config user.email "clipcrip5-bot@users.noreply.github.com"
+
+          git add \
+            giggand/used_clips.json \
+            giggand/clip_history.json
+
+          if git diff --cached --quiet; then
+            echo "Keine neue Giggand-History zum Speichern."
+            exit 0
+          fi
+
+          git commit -m "Update Giggand ClipCrip5 clip history"
+
+          git pull --rebase origin main
+          git push origin HEAD:main
