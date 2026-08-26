@@ -7,7 +7,7 @@ on:
     - cron: "25 6 * * *"
 
 concurrency:
-  group: clipcrip2-bot
+  group: clipcrip4-rohat-bot
   cancel-in-progress: false
 
 permissions:
