@@ -5,16 +5,22 @@ import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
-INPUT_DIR = "selected_clips"
-OUTPUT_DIR = "tiktok_ready"
-METADATA_FILE = "clips_today.json"
+# =========================================================
+# PATHS
+# =========================================================
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+
+INPUT_DIR = REPO_ROOT / "selected_clips"
+OUTPUT_DIR = REPO_ROOT / "tiktok_ready"
+METADATA_FILE = REPO_ROOT / "clips_today.json"
 
 MAX_VIDEOS = 5
 
-# Deutlich bessere Erkennung als small,
-# besonders bei Umgangssprache / schwierigerem Audio.
 WHISPER_MODEL = "turbo"
 
 OUTPUT_PREFIX = "jussef_tiktok"
@@ -49,12 +55,23 @@ BASE_PROMPT = (
 
 def run(command):
 
-    print("")
-    print("RUN:", " ".join(command))
+    command = [
+        str(item)
+        for item in command
+    ]
 
-    result = subprocess.run(command)
+    print("")
+    print(
+        "RUN:",
+        " ".join(command)
+    )
+
+    result = subprocess.run(
+        command
+    )
 
     if result.returncode != 0:
+
         raise RuntimeError(
             "Befehl fehlgeschlagen: "
             + " ".join(command)
@@ -67,19 +84,65 @@ def run(command):
 
 def load_json(path, default):
 
-    if not os.path.exists(path):
+    path = Path(path)
+
+    if not path.exists():
         return default
 
     try:
+
         with open(
             path,
             "r",
             encoding="utf-8"
         ) as file:
+
             return json.load(file)
 
-    except Exception:
+    except Exception as error:
+
+        print(
+            f"JSON konnte nicht geladen werden: "
+            f"{path}"
+        )
+
+        print(error)
+
         return default
+
+
+# =========================================================
+# VIDEO SORTIERUNG
+# =========================================================
+
+def video_number(path):
+
+    name = Path(path).stem
+
+    match = re.search(
+        r"clip_(\d+)",
+        name,
+        re.IGNORECASE
+    )
+
+    if match:
+
+        return int(
+            match.group(1)
+        )
+
+    match = re.search(
+        r"(\d+)",
+        name
+    )
+
+    if match:
+
+        return int(
+            match.group(1)
+        )
+
+    return 999999
 
 
 # =========================================================
@@ -88,25 +151,105 @@ def load_json(path, default):
 
 def find_videos():
 
+    print("")
+    print(
+        "========================================"
+    )
+
+    print(
+        "SELECTED_CLIPS SUCHEN"
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        f"Repository Root: {REPO_ROOT}"
+    )
+
+    print(
+        f"Erwarteter Ordner: {INPUT_DIR}"
+    )
+
+    print(
+        f"Ordner existiert: {INPUT_DIR.exists()}"
+    )
+
+    if INPUT_DIR.exists():
+
+        try:
+
+            contents = list(
+                INPUT_DIR.iterdir()
+            )
+
+            print(
+                f"Inhalt selected_clips: "
+                f"{len(contents)} Dateien/Ordner"
+            )
+
+            for item in contents:
+
+                print(
+                    "  -> "
+                    + str(item)
+                )
+
+        except Exception as error:
+
+            print(
+                "Ordnerinhalt konnte nicht "
+                "angezeigt werden:"
+            )
+
+            print(error)
+
     videos = []
 
-    for extension in (
-        "mp4",
-        "webm",
-        "mkv",
-        "mov"
-    ):
+    extensions = {
+        ".mp4",
+        ".webm",
+        ".mkv",
+        ".mov",
+        ".m4v",
+    }
 
-        videos.extend(
-            glob.glob(
-                os.path.join(
-                    INPUT_DIR,
-                    f"*.{extension}"
+    if INPUT_DIR.exists():
+
+        for path in INPUT_DIR.iterdir():
+
+            if (
+                path.is_file()
+                and path.suffix.lower()
+                in extensions
+            ):
+
+                videos.append(
+                    path
                 )
-            )
+
+    videos.sort(
+        key=lambda path: (
+            video_number(path),
+            path.name.lower()
+        )
+    )
+
+    print("")
+    print(
+        f"{len(videos)} Videos in "
+        "selected_clips gefunden."
+    )
+
+    for video in videos:
+
+        print(
+            "VIDEO GEFUNDEN: "
+            + str(video)
         )
 
-    return sorted(videos)
+    return videos
 
 
 # =========================================================
@@ -115,23 +258,33 @@ def find_videos():
 
 def clean_output():
 
-    os.makedirs(
-        OUTPUT_DIR,
+    OUTPUT_DIR.mkdir(
+        parents=True,
         exist_ok=True
     )
 
-    for path in glob.glob(
-        os.path.join(
-            OUTPUT_DIR,
-            "*"
-        )
-    ):
+    for path in OUTPUT_DIR.iterdir():
 
-        if os.path.isfile(path):
-            os.remove(path)
+        try:
 
-        elif os.path.isdir(path):
-            shutil.rmtree(path)
+            if path.is_file():
+
+                path.unlink()
+
+            elif path.is_dir():
+
+                shutil.rmtree(
+                    path
+                )
+
+        except Exception as error:
+
+            print(
+                f"Konnte Output-Datei nicht "
+                f"löschen: {path}"
+            )
+
+            print(error)
 
 
 # =========================================================
@@ -140,7 +293,9 @@ def clean_output():
 
 def clean_text(text):
 
-    text = str(text).strip()
+    text = str(
+        text
+    ).strip()
 
     text = re.sub(
         r"\s+",
@@ -150,9 +305,18 @@ def clean_text(text):
 
     text = (
         text
-        .replace("{", "(")
-        .replace("}", ")")
-        .replace("\\", "")
+        .replace(
+            "{",
+            "("
+        )
+        .replace(
+            "}",
+            ")"
+        )
+        .replace(
+            "\\",
+            ""
+        )
     )
 
     return text
@@ -160,14 +324,28 @@ def clean_text(text):
 
 def escape_ass_text(text):
 
-    text = clean_text(text)
+    text = clean_text(
+        text
+    )
 
     text = (
         text
-        .replace("\\", "")
-        .replace("{", "(")
-        .replace("}", ")")
-        .replace("\n", " ")
+        .replace(
+            "\\",
+            ""
+        )
+        .replace(
+            "{",
+            "("
+        )
+        .replace(
+            "}",
+            ")"
+        )
+        .replace(
+            "\n",
+            " "
+        )
     )
 
     return text
@@ -189,7 +367,9 @@ def ass_time(seconds):
     )
 
     minutes = int(
-        (seconds % 3600) // 60
+        (
+            seconds % 3600
+        ) // 60
     )
 
     secs = int(
@@ -202,6 +382,14 @@ def ass_time(seconds):
             - int(seconds)
         )
         * 100
+    )
+
+    centiseconds = max(
+        0,
+        min(
+            99,
+            centiseconds
+        )
     )
 
     return (
@@ -225,7 +413,11 @@ def create_transcription(
     print(
         "========================================"
     )
-    print("WHISPER TURBO")
+
+    print(
+        "WHISPER TURBO"
+    )
+
     print(
         "========================================"
     )
@@ -234,17 +426,23 @@ def create_transcription(
         f"Analysiere Sprache: {video}"
     )
 
-    base_name = os.path.splitext(
-        os.path.basename(video)
-    )[0]
-
-    json_file = os.path.join(
-        OUTPUT_DIR,
-        base_name + ".json"
+    video = Path(
+        video
     )
 
-    if os.path.exists(json_file):
-        os.remove(json_file)
+    base_name = video.stem
+
+    json_file = (
+        OUTPUT_DIR
+        / (
+            base_name
+            + ".json"
+        )
+    )
+
+    if json_file.exists():
+
+        json_file.unlink()
 
     prompt = BASE_PROMPT
 
@@ -252,7 +450,9 @@ def create_transcription(
 
         prompt += (
             " Der Twitch-Clip trägt den Titel: "
-            + clean_text(clip_title)
+            + clean_text(
+                clip_title
+            )
             + "."
         )
 
@@ -261,7 +461,7 @@ def create_transcription(
         "-m",
         "whisper",
 
-        video,
+        str(video),
 
         "--model",
         WHISPER_MODEL,
@@ -278,17 +478,12 @@ def create_transcription(
         "--initial_prompt",
         prompt,
 
-        # stabilere Decodierung
         "--temperature",
         "0",
-
-        "--beam_size",
-        "5",
 
         "--condition_on_previous_text",
         "False",
 
-        # GitHub Runner = CPU
         "--fp16",
         "False",
 
@@ -296,7 +491,7 @@ def create_transcription(
         "json",
 
         "--output_dir",
-        OUTPUT_DIR,
+        str(OUTPUT_DIR),
 
         "--verbose",
         "False",
@@ -304,25 +499,35 @@ def create_transcription(
 
     try:
 
-        run(command)
+        run(
+            command
+        )
 
     except Exception as error:
 
         print(
-            "WARNUNG: Whisper fehlgeschlagen:"
+            "WARNUNG: Whisper "
+            "fehlgeschlagen:"
         )
 
-        print(error)
+        print(
+            error
+        )
 
         return None
 
-    if not os.path.exists(json_file):
+    if not json_file.exists():
 
         print(
             "WARNUNG: Whisper JSON fehlt."
         )
 
         return None
+
+    print(
+        "Whisper erfolgreich: "
+        + str(json_file)
+    )
 
     return json_file
 
@@ -335,15 +540,45 @@ def extract_words(data):
 
     words = []
 
+    if not isinstance(
+        data,
+        dict
+    ):
+
+        return words
+
     for segment in data.get(
         "segments",
         []
     ):
 
-        for word in segment.get(
+        if not isinstance(
+            segment,
+            dict
+        ):
+
+            continue
+
+        segment_words = segment.get(
             "words",
             []
+        )
+
+        if not isinstance(
+            segment_words,
+            list
         ):
+
+            continue
+
+        for word in segment_words:
+
+            if not isinstance(
+                word,
+                dict
+            ):
+
+                continue
 
             text = clean_text(
                 word.get(
@@ -372,15 +607,25 @@ def extract_words(data):
                 )
 
             except Exception:
+
                 continue
 
             if end <= start:
-                end = start + 0.2
+
+                end = (
+                    start
+                    + 0.2
+                )
 
             words.append({
-                "text": text,
-                "start": start,
-                "end": end,
+                "text":
+                    text,
+
+                "start":
+                    start,
+
+                "end":
+                    end,
             })
 
     return words
@@ -394,10 +639,24 @@ def extract_segments(data):
 
     segments = []
 
+    if not isinstance(
+        data,
+        dict
+    ):
+
+        return segments
+
     for segment in data.get(
         "segments",
         []
     ):
+
+        if not isinstance(
+            segment,
+            dict
+        ):
+
+            continue
 
         text = clean_text(
             segment.get(
@@ -407,6 +666,7 @@ def extract_segments(data):
         )
 
         if not text:
+
             continue
 
         try:
@@ -426,15 +686,25 @@ def extract_segments(data):
             )
 
         except Exception:
+
             continue
 
         if end <= start:
-            end = start + 2
+
+            end = (
+                start
+                + 2
+            )
 
         segments.append({
-            "text": text,
-            "start": start,
-            "end": end,
+            "text":
+                text,
+
+            "start":
+                start,
+
+            "end":
+                end,
         })
 
     return segments
@@ -446,18 +716,15 @@ def extract_segments(data):
 
 def words_to_chunks(words):
 
-    """
-    Klassischer TikTok-Stil:
-    kurze 2–4 Wortgruppen.
-    """
-
     chunks = []
 
     current = []
 
     for word in words:
 
-        current.append(word)
+        current.append(
+            word
+        )
 
         current_text = " ".join(
             item["text"]
@@ -472,17 +739,21 @@ def words_to_chunks(words):
         should_finish = False
 
         if len(current) >= 4:
+
             should_finish = True
 
         elif (
             len(current) >= 3
             and duration >= 1.2
         ):
+
             should_finish = True
 
         elif (
             len(current) >= 2
-            and current[-1]["text"].endswith(
+            and current[-1][
+                "text"
+            ].endswith(
                 (
                     ".",
                     "!",
@@ -493,20 +764,30 @@ def words_to_chunks(words):
                 )
             )
         ):
+
             should_finish = True
 
-        elif len(current_text) >= 28:
+        elif len(
+            current_text
+        ) >= 28:
+
             should_finish = True
 
         if not should_finish:
+
             continue
 
-        chunks.append(current)
+        chunks.append(
+            current
+        )
 
         current = []
 
     if current:
-        chunks.append(current)
+
+        chunks.append(
+            current
+        )
 
     return chunks
 
@@ -515,14 +796,19 @@ def words_to_chunks(words):
 # FALLBACK CHUNKS
 # =========================================================
 
-def segment_to_word_groups(segment):
+def segment_to_word_groups(
+    segment
+):
 
     words = (
-        segment["text"]
+        segment[
+            "text"
+        ]
         .split()
     )
 
     if not words:
+
         return []
 
     groups = []
@@ -530,7 +816,9 @@ def segment_to_word_groups(segment):
     max_words = 4
 
     pieces = [
-        words[i:i + max_words]
+        words[
+            i:i + max_words
+        ]
         for i in range(
             0,
             len(words),
@@ -558,14 +846,23 @@ def segment_to_word_groups(segment):
         end = (
             segment["start"]
             + duration
-            * (index + 1)
+            * (
+                index + 1
+            )
             / len(pieces)
         )
 
         groups.append({
-            "text": " ".join(piece),
-            "start": start,
-            "end": end,
+            "text":
+                " ".join(
+                    piece
+                ),
+
+            "start":
+                start,
+
+            "end":
+                end,
         })
 
     return groups
@@ -575,13 +872,9 @@ def segment_to_word_groups(segment):
 # KARAOKE TEXT
 # =========================================================
 
-def create_karaoke_text(words):
-
-    """
-    ASS Karaoke:
-    gesprochenes Wort wird gelb,
-    Rest bleibt weiß.
-    """
+def create_karaoke_text(
+    words
+):
 
     parts = []
 
@@ -595,22 +888,28 @@ def create_karaoke_text(words):
 
         centiseconds = max(
             8,
-            int(duration * 100)
+            int(
+                duration
+                * 100
+            )
         )
 
         text = escape_ass_text(
             word["text"]
         )
 
-        # \kf sorgt für laufendes Highlighting.
         parts.append(
             "{\\kf"
-            + str(centiseconds)
+            + str(
+                centiseconds
+            )
             + "}"
             + text
         )
 
-    return " ".join(parts)
+    return " ".join(
+        parts
+    )
 
 
 # =========================================================
@@ -621,6 +920,10 @@ def create_ass(
     json_file,
     ass_file
 ):
+
+    ass_file = Path(
+        ass_file
+    )
 
     header = [
         "[Script Info]",
@@ -649,7 +952,6 @@ def create_ass(
             "DejaVu Sans,"
             "72,"
             "&H00FFFFFF,"
-            # Karaoke Highlight GELB
             "&H0000FFFF,"
             "&H00000000,"
             "&H70000000,"
@@ -664,11 +966,9 @@ def create_ass(
             "1,"
             "6,"
             "2,"
-            # Alignment 2 = unten mittig
             "2,"
             "70,"
             "70,"
-            # etwas oberhalb TikTok UI
             "420,"
             "1"
         ),
@@ -693,10 +993,16 @@ def create_ass(
         ) as file:
 
             file.write(
-                "\n".join(header)
+                "\n".join(
+                    header
+                )
             )
 
         return False
+
+    json_file = Path(
+        json_file
+    )
 
     try:
 
@@ -706,22 +1012,29 @@ def create_ass(
             encoding="utf-8"
         ) as file:
 
-            data = json.load(file)
+            data = json.load(
+                file
+            )
 
     except Exception as error:
 
         print(
-            f"Whisper JSON Fehler: {error}"
+            f"Whisper JSON Fehler: "
+            f"{error}"
         )
 
         return False
 
-    words = extract_words(data)
+    words = extract_words(
+        data
+    )
 
-    lines = list(header)
+    lines = list(
+        header
+    )
 
     # =====================================================
-    # BEST CASE: WORD TIMESTAMPS
+    # WORD TIMESTAMPS
     # =====================================================
 
     if words:
@@ -732,12 +1045,30 @@ def create_ass(
 
         for chunk in chunks:
 
-            start = chunk[0]["start"]
-            end = chunk[-1]["end"]
+            if not chunk:
+                continue
 
-            # Minimale Lesedauer
-            if end - start < 0.35:
-                end = start + 0.35
+            start = chunk[
+                0
+            ][
+                "start"
+            ]
+
+            end = chunk[
+                -1
+            ][
+                "end"
+            ]
+
+            if (
+                end - start
+                < 0.35
+            ):
+
+                end = (
+                    start
+                    + 0.35
+                )
 
             text = create_karaoke_text(
                 chunk
@@ -768,14 +1099,18 @@ def create_ass(
 
         for segment in segments:
 
-            groups = segment_to_word_groups(
-                segment
+            groups = (
+                segment_to_word_groups(
+                    segment
+                )
             )
 
             for group in groups:
 
                 text = escape_ass_text(
-                    group["text"]
+                    group[
+                        "text"
+                    ]
                 )
 
                 lines.append(
@@ -803,7 +1138,9 @@ def create_ass(
     ) as file:
 
         file.write(
-            "\n".join(lines)
+            "\n".join(
+                lines
+            )
         )
 
     print(
@@ -811,7 +1148,10 @@ def create_ass(
         "TikTok-Untertitelblöcke erstellt."
     )
 
-    return caption_count > 0
+    return (
+        caption_count
+        > 0
+    )
 
 
 # =========================================================
@@ -820,15 +1160,26 @@ def create_ass(
 
 def escape_filter_path(path):
 
-    absolute = os.path.abspath(
-        path
+    absolute = str(
+        Path(
+            path
+        ).resolve()
     )
 
     absolute = (
         absolute
-        .replace("\\", "/")
-        .replace(":", "\\:")
-        .replace("'", "\\'")
+        .replace(
+            "\\",
+            "/"
+        )
+        .replace(
+            ":",
+            "\\:"
+        )
+        .replace(
+            "'",
+            "\\'"
+        )
     )
 
     return absolute
@@ -845,7 +1196,6 @@ def create_filter(
 
     filter_parts = [
 
-        # BLURRED BACKGROUND
         (
             "[0:v]"
             "scale=1080:1920:"
@@ -857,7 +1207,6 @@ def create_filter(
             "[bg]"
         ),
 
-        # KOMPLETTES ORIGINAL
         (
             "[0:v]"
             "scale=1080:1920:"
@@ -866,7 +1215,6 @@ def create_filter(
             "[fg]"
         ),
 
-        # ORIGINAL MITTIG
         (
             "[bg][fg]"
             "overlay="
@@ -886,7 +1234,7 @@ def create_filter(
         current
         +
         "drawtext="
-        "text='@Clipcrip2':"
+        f"text='{WATERMARK}':"
         "font='DejaVu Sans':"
         "fontsize=54:"
         "fontcolor=white@0.58:"
@@ -905,8 +1253,10 @@ def create_filter(
 
     if has_subtitles:
 
-        escaped_ass = escape_filter_path(
-            ass_file
+        escaped_ass = (
+            escape_filter_path(
+                ass_file
+            )
         )
 
         filter_parts.append(
@@ -914,14 +1264,18 @@ def create_filter(
             +
             "subtitles="
             f"'{escaped_ass}'"
-            ":fontsdir=/usr/share/fonts/truetype/dejavu"
+            ":fontsdir="
+            "/usr/share/fonts/"
+            "truetype/dejavu"
             "[final]"
         )
 
         current = "[final]"
 
     return (
-        ";".join(filter_parts),
+        ";".join(
+            filter_parts
+        ),
         current
     )
 
@@ -937,45 +1291,88 @@ def process_video(
     metadata
 ):
 
+    source = Path(
+        source
+    )
+
+    output = Path(
+        output
+    )
+
     print("")
     print(
         "========================================"
     )
+
     print(
         f"VIDEO {index}"
     )
+
     print(
         "========================================"
     )
 
+    print(
+        f"Quelle: {source}"
+    )
+
+    if not source.exists():
+
+        raise RuntimeError(
+            f"Quelldatei fehlt: "
+            f"{source}"
+        )
+
+    source_size = source.stat().st_size
+
+    print(
+        "Quelldatei Größe: "
+        f"{source_size / 1024 / 1024:.1f} MB"
+    )
+
+    if source_size < 10000:
+
+        raise RuntimeError(
+            f"Quelldatei ist "
+            f"verdächtig klein: "
+            f"{source}"
+        )
+
     clip_title = ""
 
-    if isinstance(metadata, dict):
+    if isinstance(
+        metadata,
+        dict
+    ):
+
         clip_title = metadata.get(
             "title",
             ""
         )
 
     print(
-        f"Clip-Titel: {clip_title}"
+        f"Clip-Titel: "
+        f"{clip_title}"
     )
 
     # =====================================================
     # 1. TRANSKRIPTION
     # =====================================================
 
-    json_file = create_transcription(
-        source,
-        clip_title
+    json_file = (
+        create_transcription(
+            source,
+            clip_title
+        )
     )
 
     # =====================================================
     # 2. TIKTOK SUBTITLES
     # =====================================================
 
-    ass_file = os.path.join(
-        OUTPUT_DIR,
-        f"caption_{index}.ass"
+    ass_file = (
+        OUTPUT_DIR
+        / f"caption_{index}.ass"
     )
 
     has_subtitles = create_ass(
@@ -996,11 +1393,12 @@ def process_video(
     # 3. VIDEO FILTER
     # =====================================================
 
-    filter_complex, final_stream = (
-        create_filter(
-            ass_file,
-            has_subtitles
-        )
+    (
+        filter_complex,
+        final_stream
+    ) = create_filter(
+        ass_file,
+        has_subtitles
     )
 
     # =====================================================
@@ -1012,7 +1410,7 @@ def process_video(
         "-y",
 
         "-i",
-        source,
+        str(source),
 
         "-filter_complex",
         filter_complex,
@@ -1055,21 +1453,21 @@ def process_video(
 
         "-shortest",
 
-        output,
+        str(output),
     ]
 
-    run(command)
+    run(
+        command
+    )
 
-    if not os.path.exists(output):
+    if not output.exists():
 
         raise RuntimeError(
             f"Finales Video fehlt: "
             f"{output}"
         )
 
-    size = os.path.getsize(
-        output
-    )
+    size = output.stat().st_size
 
     if size < 100000:
 
@@ -1089,8 +1487,11 @@ def process_video(
     )
 
     return {
-        "output": output,
-        "subtitles": has_subtitles,
+        "output":
+            str(output),
+
+        "subtitles":
+            has_subtitles,
     }
 
 
@@ -1100,26 +1501,98 @@ def process_video(
 
 def cleanup_temp_files():
 
-    for extension in (
+    extensions = (
         "*.json",
         "*.ass",
         "*.txt",
         "*.srt",
         "*.vtt",
-        "*.tsv"
-    ):
+        "*.tsv",
+    )
 
-        for path in glob.glob(
-            os.path.join(
-                OUTPUT_DIR,
-                extension
-            )
+    for extension in extensions:
+
+        for path in OUTPUT_DIR.glob(
+            extension
         ):
 
             try:
-                os.remove(path)
+
+                if path.is_file():
+
+                    path.unlink()
+
             except Exception:
+
                 pass
+
+
+# =========================================================
+# DEBUG REPOSITORY
+# =========================================================
+
+def print_repository_debug():
+
+    print("")
+    print(
+        "========================================"
+    )
+
+    print(
+        "REPOSITORY DEBUG"
+    )
+
+    print(
+        "========================================"
+    )
+
+    print(
+        f"Current Working Directory: "
+        f"{Path.cwd()}"
+    )
+
+    print(
+        f"Script Directory: "
+        f"{SCRIPT_DIR}"
+    )
+
+    print(
+        f"Repository Root: "
+        f"{REPO_ROOT}"
+    )
+
+    print("")
+    print(
+        "Ordner im Repository:"
+    )
+
+    try:
+
+        for path in sorted(
+            REPO_ROOT.iterdir(),
+            key=lambda item:
+                item.name.lower()
+        ):
+
+            marker = (
+                "DIR"
+                if path.is_dir()
+                else "FILE"
+            )
+
+            print(
+                f"[{marker}] "
+                f"{path.name}"
+            )
+
+    except Exception as error:
+
+        print(
+            "Repository konnte nicht "
+            "aufgelistet werden:"
+        )
+
+        print(error)
 
 
 # =========================================================
@@ -1132,66 +1605,194 @@ def main():
     print(
         "========================================"
     )
+
     print(
-        "CLIPCRIP2 PROCESSOR V3"
+        "CLIPCRIP2 PROCESSOR V3.1"
     )
+
     print(
         "========================================"
     )
 
     print(
+        "- Absolute Repository-Pfade"
+    )
+
+    print(
+        "- selected_clips Prüfung"
+    )
+
+    print(
         "- Whisper Turbo"
     )
+
     print(
         "- Streamer-/Slang-Kontext"
     )
+
     print(
         "- Twitch-Titel als Kontext"
     )
+
     print(
         "- TikTok Karaoke Captions"
     )
+
     print(
         "- @Clipcrip2 Wasserzeichen"
     )
 
+    print_repository_debug()
+
+    # =====================================================
+    # WICHTIG:
+    # OUTPUT ERST LÖSCHEN.
+    # selected_clips WIRD NICHT ANGEFASST.
+    # =====================================================
+
     clean_output()
+
+    # =====================================================
+    # SELECTED CLIPS LADEN
+    # =====================================================
 
     videos = find_videos()
 
     if not videos:
 
+        print("")
+        print(
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        )
+
+        print(
+            "FEHLER: selected_clips IST LEER"
+        )
+
+        print(
+            "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+        )
+
+        print(
+            f"Gesuchter Pfad:"
+        )
+
+        print(
+            str(INPUT_DIR)
+        )
+
+        print("")
+        print(
+            "Der Processor löscht selected_clips "
+            "NICHT."
+        )
+
+        print(
+            "Wenn dieser Ordner leer ist, hat "
+            "quality_control.py keine Dateien "
+            "dorthin geschrieben."
+        )
+
         raise RuntimeError(
-            "Keine selected_clips gefunden."
+            "Keine selected_clips gefunden. "
+            "Quality Control muss vorher exakt "
+            "5 Dateien nach selected_clips schreiben."
+        )
+
+    # =====================================================
+    # GENAU 5 ERWARTEN
+    # =====================================================
+
+    if len(videos) < MAX_VIDEOS:
+
+        raise RuntimeError(
+            f"Zu wenige selected_clips. "
+            f"Erwartet: {MAX_VIDEOS}. "
+            f"Gefunden: {len(videos)}."
+        )
+
+    if len(videos) > MAX_VIDEOS:
+
+        print(
+            f"WARNUNG: {len(videos)} Videos "
+            "gefunden."
+        )
+
+        print(
+            "Es werden nur die ersten "
+            f"{MAX_VIDEOS} verarbeitet."
         )
 
     videos = videos[
         :MAX_VIDEOS
     ]
 
-    if len(videos) != 5:
+    print("")
+    print(
+        "========================================"
+    )
 
-        raise RuntimeError(
-            f"Nicht genau 5 Videos. "
-            f"Gefunden: {len(videos)}"
+    print(
+        "5 INPUT VIDEOS"
+    )
+
+    print(
+        "========================================"
+    )
+
+    for index, video in enumerate(
+        videos,
+        start=1
+    ):
+
+        print(
+            f"{index}. "
+            f"{video.name}"
         )
+
+    # =====================================================
+    # METADATA
+    # =====================================================
 
     metadata_list = load_json(
         METADATA_FILE,
         []
     )
 
+    if not isinstance(
+        metadata_list,
+        list
+    ):
+
+        print(
+            "WARNUNG: clips_today.json "
+            "ist keine Liste."
+        )
+
+        metadata_list = []
+
+    print("")
+    print(
+        f"{len(metadata_list)} "
+        "Metadata-Einträge geladen."
+    )
+
     successful = []
+
     failed = []
+
+    # =====================================================
+    # VIDEOS VERARBEITEN
+    # =====================================================
 
     for index, source in enumerate(
         videos,
         start=1
     ):
 
-        output = os.path.join(
-            OUTPUT_DIR,
-            (
+        output = (
+            OUTPUT_DIR
+            / (
                 f"{index:02d}_"
                 f"{OUTPUT_PREFIX}.mp4"
             )
@@ -1203,9 +1804,21 @@ def main():
             index - 1
             < len(metadata_list)
         ):
-            metadata = metadata_list[
-                index - 1
-            ]
+
+            possible_metadata = (
+                metadata_list[
+                    index - 1
+                ]
+            )
+
+            if isinstance(
+                possible_metadata,
+                dict
+            ):
+
+                metadata = (
+                    possible_metadata
+                )
 
         try:
 
@@ -1216,7 +1829,9 @@ def main():
                 metadata
             )
 
-            successful.append(result)
+            successful.append(
+                result
+            )
 
         except Exception as error:
 
@@ -1224,26 +1839,46 @@ def main():
             print(
                 "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
             )
+
             print(
                 f"FEHLER VIDEO {index}"
             )
-            print(error)
+
+            print(
+                error
+            )
+
             print(
                 "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
             )
 
             failed.append({
-                "video": source,
-                "error": str(error),
+                "video":
+                    str(source),
+
+                "error":
+                    str(error),
             })
 
+    # =====================================================
+    # TEMP DATEIEN ENTFERNEN
+    # =====================================================
+
     cleanup_temp_files()
+
+    # =====================================================
+    # ERGEBNIS
+    # =====================================================
 
     print("")
     print(
         "========================================"
     )
-    print("ERGEBNIS")
+
+    print(
+        "ERGEBNIS"
+    )
+
     print(
         "========================================"
     )
@@ -1261,7 +1896,9 @@ def main():
     subtitle_count = sum(
         1
         for item in successful
-        if item["subtitles"]
+        if item[
+            "subtitles"
+        ]
     )
 
     print(
@@ -1270,15 +1907,28 @@ def main():
         f"{len(successful)}"
     )
 
-    if len(successful) != 5:
+    if len(
+        successful
+    ) != MAX_VIDEOS:
+
+        print("")
+        print(
+            "FEHLERDETAILS:"
+        )
 
         for item in failed:
 
+            print("")
             print(
-                item["video"]
+                item[
+                    "video"
+                ]
             )
+
             print(
-                item["error"]
+                item[
+                    "error"
+                ]
             )
 
         raise RuntimeError(
@@ -1286,34 +1936,71 @@ def main():
             "wurden verarbeitet."
         )
 
-    final_files = glob.glob(
-        os.path.join(
-            OUTPUT_DIR,
+    # =====================================================
+    # OUTPUT VALIDIEREN
+    # =====================================================
+
+    final_files = sorted(
+        OUTPUT_DIR.glob(
             "*.mp4"
         )
     )
 
-    if len(final_files) != 5:
+    print("")
+    print(
+        f"{len(final_files)} "
+        "finale MP4-Dateien gefunden."
+    )
+
+    for file in final_files:
+
+        print(
+            "OUTPUT: "
+            + file.name
+        )
+
+    if len(
+        final_files
+    ) != MAX_VIDEOS:
 
         raise RuntimeError(
             "Output enthält nicht "
             "genau 5 MP4-Dateien."
         )
 
+    # =====================================================
+    # MINDESTGRÖSSE PRÜFEN
+    # =====================================================
+
+    for file in final_files:
+
+        size = file.stat().st_size
+
+        if size < 100000:
+
+            raise RuntimeError(
+                f"Output-Datei zu klein: "
+                f"{file}"
+            )
+
     print("")
     print(
         "========================================"
     )
+
     print(
-        "PROCESSOR V3 ERFOLGREICH"
+        "PROCESSOR V3.1 ERFOLGREICH"
     )
+
     print(
         "5/5 Videos fertig."
     )
+
     print(
         "========================================"
     )
 
 
 if __name__ == "__main__":
+
     main()
