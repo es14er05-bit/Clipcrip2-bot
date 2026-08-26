@@ -15,7 +15,6 @@ permissions:
 
 jobs:
   clips-holen:
-
     runs-on: ubuntu-latest
 
     steps:
@@ -115,13 +114,52 @@ jobs:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
 
         run: |
-
           python - <<'PY'
-
           import json
           import os
+          import time
           import urllib.parse
           import urllib.request
+          import urllib.error
+
+          def request_with_retry(request, attempts=5):
+
+              last_error = None
+
+              for attempt in range(
+                  1,
+                  attempts + 1
+              ):
+
+                  try:
+
+                      return urllib.request.urlopen(
+                          request,
+                          timeout=60
+                      )
+
+                  except Exception as error:
+
+                      last_error = error
+
+                      print(
+                          f"Google Login Versuch "
+                          f"{attempt}/{attempts} "
+                          f"fehlgeschlagen: {error}"
+                      )
+
+                      if attempt < attempts:
+
+                          wait = attempt * 5
+
+                          print(
+                              f"Warte {wait} Sekunden..."
+                          )
+
+                          time.sleep(wait)
+
+              raise last_error
+
 
           data = urllib.parse.urlencode({
 
@@ -139,6 +177,7 @@ jobs:
 
           }).encode()
 
+
           request = urllib.request.Request(
 
               "https://oauth2.googleapis.com/token",
@@ -149,7 +188,8 @@ jobs:
 
           )
 
-          with urllib.request.urlopen(
+
+          with request_with_retry(
               request
           ) as response:
 
@@ -157,9 +197,11 @@ jobs:
                   response
               )
 
+
           access_token = result[
               "access_token"
           ]
+
 
           with open(
               os.environ["GITHUB_ENV"],
@@ -173,6 +215,7 @@ jobs:
                   + "\n"
               )
 
+
           print(
               "Google Drive Login erfolgreich."
           )
@@ -185,20 +228,162 @@ jobs:
 
       - name: Fertige Videos zu Google Drive hochladen
         env:
-
           DRIVE_FOLDER_ID: "14uloS4MQUcnIR-u-0aVOj1NLu3xu975R"
 
         run: |
-
           python - <<'PY'
-
           import glob
           import json
           import mimetypes
           import os
+          import socket
+          import ssl
+          import time
           import urllib.parse
           import urllib.request
+          import urllib.error
           import uuid
+
+
+          # ======================================
+          # RETRY
+          # ======================================
+
+          def request_with_retry(
+              request_factory,
+              description,
+              attempts=6,
+              timeout=180
+          ):
+
+              last_error = None
+
+              for attempt in range(
+                  1,
+                  attempts + 1
+              ):
+
+                  try:
+
+                      request = request_factory()
+
+                      response = urllib.request.urlopen(
+                          request,
+                          timeout=timeout
+                      )
+
+                      return response
+
+                  except (
+                      urllib.error.URLError,
+                      urllib.error.HTTPError,
+                      ConnectionResetError,
+                      ConnectionAbortedError,
+                      ConnectionError,
+                      TimeoutError,
+                      socket.timeout,
+                      ssl.SSLError,
+                      OSError,
+                  ) as error:
+
+                      last_error = error
+
+                      print("")
+                      print(
+                          f"WARNUNG: {description}"
+                      )
+
+                      print(
+                          f"Versuch "
+                          f"{attempt}/{attempts} "
+                          f"fehlgeschlagen."
+                      )
+
+                      print(
+                          f"Fehler: {error}"
+                      )
+
+                      if isinstance(
+                          error,
+                          urllib.error.HTTPError
+                      ):
+
+                          # 4xx Fehler wie 400/401/403
+                          # normalerweise nicht blind
+                          # mehrfach versuchen.
+                          #
+                          # 408, 429 und 5xx dürfen
+                          # erneut versucht werden.
+
+                          if (
+                              error.code
+                              not in (
+                                  408,
+                                  429,
+                                  500,
+                                  502,
+                                  503,
+                                  504,
+                              )
+                          ):
+
+                              try:
+
+                                  body = (
+                                      error.read()
+                                      .decode(
+                                          "utf-8",
+                                          errors="replace"
+                                      )
+                                  )
+
+                                  print(
+                                      "Google Antwort:"
+                                  )
+
+                                  print(
+                                      body[:2000]
+                                  )
+
+                              except Exception:
+
+                                  pass
+
+                              raise
+
+                      if attempt >= attempts:
+
+                          break
+
+                      wait = min(
+                          60,
+                          5 * (
+                              2 ** (
+                                  attempt - 1
+                              )
+                          )
+                      )
+
+                      print(
+                          f"Warte {wait} Sekunden "
+                          "und versuche es erneut..."
+                      )
+
+                      time.sleep(
+                          wait
+                      )
+
+              raise RuntimeError(
+                  f"{description} nach "
+                  f"{attempts} Versuchen "
+                  f"fehlgeschlagen: "
+                  f"{last_error}"
+              )
+
+
+          # ======================================
+          # DATEIEN
+          # ======================================
 
           files = sorted(
               glob.glob(
@@ -206,9 +391,11 @@ jobs:
               )
           )
 
+
           print(
               f"{len(files)} fertige Videos gefunden."
           )
+
 
           if len(files) != 5:
 
@@ -220,37 +407,57 @@ jobs:
 
               )
 
+
           token = os.environ[
               "GOOGLE_DRIVE_ACCESS_TOKEN"
           ]
+
 
           folder_id = os.environ[
               "DRIVE_FOLDER_ID"
           ]
 
-          for path in files:
 
-              filename = os.path.basename(
-                  path
-              )
+          # ======================================
+          # AUTH HEADER
+          # ======================================
 
-              mime_type = (
-                  mimetypes.guess_type(
-                      filename
-                  )[0]
-                  or "video/mp4"
-              )
+          def auth_headers():
 
-              print(
-                  f"Upload wird vorbereitet: "
-                  f"{filename}"
-              )
+              return {
+
+                  "Authorization":
+                      f"Bearer {token}",
+
+                  "User-Agent":
+                      "ClipCrip2-GitHub-Actions/1.0",
+
+                  "Connection":
+                      "close",
+
+              }
+
+
+          # ======================================
+          # DATEI SUCHEN
+          # ======================================
+
+          def find_existing(
+              filename
+          ):
 
               safe_filename = (
                   filename
-                  .replace("\\", "\\\\")
-                  .replace("'", "\\'")
+                  .replace(
+                      "\\",
+                      "\\\\"
+                  )
+                  .replace(
+                      "'",
+                      "\\'"
+                  )
               )
+
 
               query = (
 
@@ -260,6 +467,7 @@ jobs:
 
               )
 
+
               list_url = (
 
                   "https://www.googleapis.com/"
@@ -267,10 +475,11 @@ jobs:
 
                   + urllib.parse.urlencode({
 
-                      "q": query,
+                      "q":
+                          query,
 
                       "fields":
-                          "files(id,name)",
+                          "files(id,name,size)",
 
                       "spaces":
                           "drive",
@@ -279,61 +488,97 @@ jobs:
 
               )
 
-              req = urllib.request.Request(
 
-                  list_url,
+              def make_request():
 
-                  headers={
+                  return urllib.request.Request(
 
-                      "Authorization":
-                          f"Bearer {token}"
+                      list_url,
 
-                  },
+                      headers=auth_headers(),
+
+                  )
+
+
+              with request_with_retry(
+
+                  make_request,
+
+                  f"Drive-Suche für {filename}",
+
+                  attempts=6,
+
+                  timeout=60
+
+              ) as response:
+
+                  result = json.load(
+                      response
+                  )
+
+
+              return result.get(
+                  "files",
+                  []
+              )
+
+
+          # ======================================
+          # DATEI LÖSCHEN
+          # ======================================
+
+          def delete_file(
+              file_id,
+              filename
+          ):
+
+              url = (
+
+                  "https://www.googleapis.com/"
+                  "drive/v3/files/"
+                  + file_id
 
               )
 
-              with urllib.request.urlopen(
-                  req
-              ) as response:
 
-                  existing = json.load(
-                      response
-                  ).get(
-                      "files",
-                      []
+              def make_request():
+
+                  return urllib.request.Request(
+
+                      url,
+
+                      method="DELETE",
+
+                      headers=auth_headers(),
+
                   )
 
-              for old in existing:
 
-                  print(
-                      "Alte Version wird gelöscht: "
-                      + old["name"]
-                  )
+              with request_with_retry(
 
-                  delete_req = (
-                      urllib.request.Request(
+                  make_request,
 
-                          "https://www.googleapis.com/"
-                          "drive/v3/files/"
-                          + old["id"],
+                  f"Alte Drive-Datei löschen: "
+                  f"{filename}",
 
-                          method="DELETE",
+                  attempts=6,
 
-                          headers={
+                  timeout=60
 
-                              "Authorization":
-                                  f"Bearer {token}"
+              ):
 
-                          },
+                  pass
 
-                      )
-                  )
 
-                  with urllib.request.urlopen(
-                      delete_req
-                  ):
+          # ======================================
+          # VIDEO UPLOAD
+          # ======================================
 
-                      pass
+          def upload_video(
+              path,
+              filename,
+              mime_type
+          ):
 
               metadata = {
 
@@ -345,12 +590,6 @@ jobs:
 
               }
 
-              boundary = (
-
-                  "clipcrip2_"
-                  + uuid.uuid4().hex
-
-              )
 
               with open(
                   path,
@@ -361,96 +600,354 @@ jobs:
                       video_file.read()
                   )
 
-              header = (
 
-                  f"--{boundary}\r\n"
+              print(
+                  f"Dateigröße: "
+                  f"{len(video_data) / 1024 / 1024:.1f} MB"
+              )
 
-                  "Content-Type: "
-                  "application/json; "
-                  "charset=UTF-8\r\n\r\n"
 
-                  + json.dumps(
-                      metadata
+              upload_url = (
+
+                  "https://www.googleapis.com/"
+                  "upload/drive/v3/files"
+                  "?uploadType=multipart"
+                  "&fields=id,name,size"
+
+              )
+
+
+              def make_request():
+
+                  # WICHTIG:
+                  # Bei jedem Retry neue Boundary
+                  # und neuen Request erstellen.
+
+                  boundary = (
+
+                      "clipcrip2_"
+                      + uuid.uuid4().hex
+
                   )
 
-                  + "\r\n"
 
-                  f"--{boundary}\r\n"
+                  header = (
 
-                  f"Content-Type: "
-                  f"{mime_type}\r\n\r\n"
+                      f"--{boundary}\r\n"
 
-              ).encode(
-                  "utf-8"
-              )
+                      "Content-Type: "
+                      "application/json; "
+                      "charset=UTF-8\r\n\r\n"
 
-              footer = (
+                      + json.dumps(
+                          metadata
+                      )
 
-                  f"\r\n--{boundary}--\r\n"
+                      + "\r\n"
 
-              ).encode(
-                  "utf-8"
-              )
+                      f"--{boundary}\r\n"
 
-              body = (
+                      f"Content-Type: "
+                      f"{mime_type}\r\n\r\n"
 
-                  header
-                  + video_data
-                  + footer
+                  ).encode(
+                      "utf-8"
+                  )
 
-              )
 
-              upload_req = (
-                  urllib.request.Request(
+                  footer = (
 
-                      "https://www.googleapis.com/"
-                      "upload/drive/v3/files"
-                      "?uploadType=multipart"
-                      "&fields=id,name",
+                      f"\r\n"
+                      f"--{boundary}--\r\n"
+
+                  ).encode(
+                      "utf-8"
+                  )
+
+
+                  body = (
+
+                      header
+                      + video_data
+                      + footer
+
+                  )
+
+
+                  headers = auth_headers()
+
+                  headers.update({
+
+                      "Content-Type":
+                          "multipart/related; "
+                          f"boundary={boundary}",
+
+                      "Content-Length":
+                          str(
+                              len(body)
+                          ),
+
+                  })
+
+
+                  return urllib.request.Request(
+
+                      upload_url,
 
                       data=body,
 
                       method="POST",
 
-                      headers={
-
-                          "Authorization":
-                              f"Bearer {token}",
-
-                          "Content-Type":
-                              "multipart/related; "
-                              f"boundary={boundary}",
-
-                          "Content-Length":
-                              str(
-                                  len(body)
-                              ),
-
-                      },
+                      headers=headers,
 
                   )
-              )
 
-              with urllib.request.urlopen(
-                  upload_req
+
+              with request_with_retry(
+
+                  make_request,
+
+                  f"Upload von {filename}",
+
+                  attempts=6,
+
+                  timeout=300
+
               ) as response:
 
-                  uploaded = json.load(
+                  return json.load(
                       response
                   )
 
-              print(
 
-                  "GOOGLE DRIVE OK: "
-                  + uploaded["name"]
-                  + " | ID: "
-                  + uploaded["id"]
+          # ======================================
+          # ALLE 5 VERARBEITEN
+          # ======================================
+
+          uploaded_count = 0
+
+
+          for index, path in enumerate(
+              files,
+              start=1
+          ):
+
+              filename = os.path.basename(
+                  path
+              )
+
+
+              mime_type = (
+
+                  mimetypes.guess_type(
+                      filename
+                  )[0]
+
+                  or "video/mp4"
 
               )
 
+
+              print("")
+              print(
+                  "======================================"
+              )
+
+              print(
+                  f"GOOGLE DRIVE VIDEO {index}/5"
+              )
+
+              print(
+                  "======================================"
+              )
+
+              print(
+                  f"Datei: {filename}"
+              )
+
+
+              # ----------------------------------
+              # VORHANDENE DATEIEN FINDEN
+              # ----------------------------------
+
+              existing = find_existing(
+                  filename
+              )
+
+
+              if existing:
+
+                  print(
+                      f"{len(existing)} alte "
+                      "Version(en) gefunden."
+                  )
+
+              else:
+
+                  print(
+                      "Keine alte Version gefunden."
+                  )
+
+
+              # ----------------------------------
+              # NEUES VIDEO ZUERST HOCHLADEN
+              #
+              # Wichtig:
+              # Wir löschen die alte Version
+              # NICHT bevor sicher ist, dass der
+              # neue Upload funktioniert.
+              # ----------------------------------
+
+              print(
+                  "Neue Version wird hochgeladen..."
+              )
+
+
+              uploaded = upload_video(
+
+                  path,
+                  filename,
+                  mime_type
+
+              )
+
+
+              new_id = uploaded[
+                  "id"
+              ]
+
+
+              print(
+                  "UPLOAD ERFOLGREICH: "
+                  + uploaded["name"]
+                  + " | ID: "
+                  + new_id
+              )
+
+
+              # ----------------------------------
+              # ERST JETZT ALTE VERSIONEN LÖSCHEN
+              # ----------------------------------
+
+              for old in existing:
+
+                  old_id = old.get(
+                      "id"
+                  )
+
+                  old_name = old.get(
+                      "name",
+                      filename
+                  )
+
+
+                  if (
+                      not old_id
+                      or old_id == new_id
+                  ):
+
+                      continue
+
+
+                  print(
+                      "Alte Version wird gelöscht: "
+                      + old_name
+                  )
+
+
+                  delete_file(
+                      old_id,
+                      old_name
+                  )
+
+
+              # ----------------------------------
+              # KONTROLLE
+              # ----------------------------------
+
+              verification = find_existing(
+                  filename
+              )
+
+
+              matching_new = [
+
+                  item
+                  for item in verification
+                  if item.get(
+                      "id"
+                  ) == new_id
+
+              ]
+
+
+              if not matching_new:
+
+                  raise RuntimeError(
+
+                      "Drive-Verifikation "
+                      "fehlgeschlagen für "
+                      + filename
+
+                  )
+
+
+              uploaded_count += 1
+
+
+              print(
+                  f"GOOGLE DRIVE OK "
+                  f"({uploaded_count}/5): "
+                  f"{filename}"
+              )
+
+
+              # Kleine Pause zwischen Uploads,
+              # damit nicht 5 große Requests
+              # unmittelbar hintereinander kommen.
+
+              if index < len(files):
+
+                  print(
+                      "Warte 3 Sekunden vor "
+                      "dem nächsten Upload..."
+                  )
+
+                  time.sleep(
+                      3
+                  )
+
+
+          # ======================================
+          # FINALE PRÜFUNG
+          # ======================================
+
+          if uploaded_count != 5:
+
+              raise RuntimeError(
+
+                  "Nicht alle Videos wurden "
+                  "erfolgreich hochgeladen. "
+                  f"Erfolg: {uploaded_count}/5"
+
+              )
+
+
+          print("")
           print(
-              "Alle 5 Videos wurden "
-              "zu Google Drive hochgeladen."
+              "======================================"
+          )
+
+          print(
+              "GOOGLE DRIVE ERFOLGREICH"
+          )
+
+          print(
+              "Alle 5 Videos wurden hochgeladen."
+          )
+
+          print(
+              "======================================"
           )
 
           PY
