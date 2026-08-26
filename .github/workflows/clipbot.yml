@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
   schedule:
-    - cron: "0 8 * * *"
+    - cron: "10 6 * * *"
 
 concurrency:
   group: clipcrip2-bot
@@ -123,7 +123,6 @@ jobs:
           import urllib.parse
           import urllib.request
 
-
           data = urllib.parse.urlencode({
 
               "client_id":
@@ -140,7 +139,6 @@ jobs:
 
           }).encode()
 
-
           request = urllib.request.Request(
 
               "https://oauth2.googleapis.com/token",
@@ -151,7 +149,6 @@ jobs:
 
           )
 
-
           with urllib.request.urlopen(
               request
           ) as response:
@@ -160,11 +157,9 @@ jobs:
                   response
               )
 
-
           access_token = result[
               "access_token"
           ]
-
 
           with open(
               os.environ["GITHUB_ENV"],
@@ -205,18 +200,15 @@ jobs:
           import urllib.request
           import uuid
 
-
           files = sorted(
               glob.glob(
                   "tiktok_ready/*.mp4"
               )
           )
 
-
           print(
               f"{len(files)} fertige Videos gefunden."
           )
-
 
           if len(files) != 5:
 
@@ -228,7 +220,6 @@ jobs:
 
               )
 
-
           token = os.environ[
               "GOOGLE_DRIVE_ACCESS_TOKEN"
           ]
@@ -236,7 +227,6 @@ jobs:
           folder_id = os.environ[
               "DRIVE_FOLDER_ID"
           ]
-
 
           for path in files:
 
@@ -251,17 +241,10 @@ jobs:
                   or "video/mp4"
               )
 
-
               print(
                   f"Upload wird vorbereitet: "
                   f"{filename}"
               )
-
-
-              # ----------------------------------
-              # ALTE DATEI MIT GLEICHEM NAMEN
-              # SUCHEN
-              # ----------------------------------
 
               safe_filename = (
                   filename
@@ -276,7 +259,6 @@ jobs:
                   "and trashed=false"
 
               )
-
 
               list_url = (
 
@@ -297,7 +279,6 @@ jobs:
 
               )
 
-
               req = urllib.request.Request(
 
                   list_url,
@@ -311,7 +292,6 @@ jobs:
 
               )
 
-
               with urllib.request.urlopen(
                   req
               ) as response:
@@ -323,18 +303,12 @@ jobs:
                       []
                   )
 
-
-              # ----------------------------------
-              # ALTE VERSION LÖSCHEN
-              # ----------------------------------
-
               for old in existing:
 
                   print(
                       "Alte Version wird gelöscht: "
                       + old["name"]
                   )
-
 
                   delete_req = (
                       urllib.request.Request(
@@ -355,17 +329,11 @@ jobs:
                       )
                   )
 
-
                   with urllib.request.urlopen(
                       delete_req
                   ):
 
                       pass
-
-
-              # ----------------------------------
-              # NEUE DATEI HOCHLADEN
-              # ----------------------------------
 
               metadata = {
 
@@ -377,14 +345,12 @@ jobs:
 
               }
 
-
               boundary = (
 
                   "clipcrip2_"
                   + uuid.uuid4().hex
 
               )
-
 
               with open(
                   path,
@@ -394,7 +360,6 @@ jobs:
                   video_data = (
                       video_file.read()
                   )
-
 
               header = (
 
@@ -419,7 +384,6 @@ jobs:
                   "utf-8"
               )
 
-
               footer = (
 
                   f"\r\n--{boundary}--\r\n"
@@ -428,7 +392,6 @@ jobs:
                   "utf-8"
               )
 
-
               body = (
 
                   header
@@ -436,7 +399,6 @@ jobs:
                   + footer
 
               )
-
 
               upload_req = (
                   urllib.request.Request(
@@ -469,7 +431,6 @@ jobs:
                   )
               )
 
-
               with urllib.request.urlopen(
                   upload_req
               ) as response:
@@ -477,7 +438,6 @@ jobs:
                   uploaded = json.load(
                       response
                   )
-
 
               print(
 
@@ -487,7 +447,6 @@ jobs:
                   + uploaded["id"]
 
               )
-
 
           print(
               "Alle 5 Videos wurden "
