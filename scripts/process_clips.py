@@ -1,5 +1,6 @@
 import os
 import glob
+import hashlib
 import json
 import re
 import shutil
@@ -29,6 +30,10 @@ WATERMARK = "@Clipcrip2"
 
 TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
+
+HOOKS_ENABLED = True
+HOOK_DURATION = 2.8
+HOOK_MIN_SCORE = 1.0
 
 
 # =========================================================
@@ -349,6 +354,391 @@ def escape_ass_text(text):
     )
 
     return text
+
+
+# =========================================================
+# NATUERLICHE TIKTOK HOOKS
+# =========================================================
+
+HOOK_BANKS = {
+    "laugh": [
+        "bro konnte selber nicht mehr",
+        "ab da konnte keiner mehr",
+        "die haben sich komplett verloren",
+        "einfach alle gebrochen",
+    ],
+
+    "surprise": [
+        "das kam so ausm nix",
+        "niemals ist das grad passiert",
+        "bro war kurz komplett raus",
+        "was passiert hier bitte",
+    ],
+
+    "fail": [
+        "bro dachte echt das klappt",
+        "ja gut das wars dann",
+        "das ging ja richtig gut",
+        "direkt komplett zerlegt",
+    ],
+
+    "rage": [
+        "bro hats komplett gereicht",
+        "da war vorbei mit entspannt",
+        "er hatte gar kein nerv mehr",
+        "bro war komplett durch",
+    ],
+
+    "chat": [
+        "chat hat ihn direkt hops genommen",
+        "chat wusste genau was er macht",
+        "bro gegen den ganzen chat",
+        "chat war wieder ganz entspannt",
+    ],
+
+    "roast": [
+        "direkt komplett hops genommen",
+        "bro hatte darauf keine antwort",
+        "das hat viel zu hart getroffen",
+        "einfach ohne vorwarnung zerlegt",
+    ],
+
+    "sus": [
+        "bro war sich viel zu sicher",
+        "so sicher und trotzdem falsch",
+        "niemals glaubt das jemand",
+        "er zieht einfach komplett durch",
+    ],
+}
+
+
+HOOK_SIGNALS = {
+    "laugh": [
+        ("hahahaha", 2.2),
+        ("hahaha", 2.0),
+        ("haha", 1.2),
+        ("ich kann nicht mehr", 1.8),
+        ("kann nicht mehr", 1.2),
+        ("musste lachen", 1.5),
+        ("lacht", 1.2),
+        ("lachen", 1.0),
+        ("zu lustig", 1.4),
+    ],
+
+    "surprise": [
+        ("oh mein gott", 2.0),
+        ("was zur hölle", 2.0),
+        ("was ist das", 1.5),
+        ("was war das", 1.5),
+        ("niemals", 1.5),
+        ("wtf", 1.5),
+        ("oha", 1.1),
+        ("sprachlos", 1.3),
+        ("nicht dein ernst", 1.5),
+        ("ist das dein ernst", 1.5),
+    ],
+
+    "fail": [
+        ("verkackt", 1.7),
+        ("gefailt", 1.6),
+        ("fail", 1.4),
+        ("verloren", 1.1),
+        ("gestorben", 1.1),
+        ("gekillt", 1.1),
+        ("daneben", 1.0),
+        ("nicht geklappt", 1.6),
+        ("funktioniert nicht", 1.3),
+        ("crash", 1.2),
+    ],
+
+    "rage": [
+        ("ausgerastet", 2.0),
+        ("rastet aus", 2.0),
+        ("ausrasten", 1.7),
+        ("rage", 1.5),
+        ("halt die fresse", 1.8),
+        ("kein nerv", 1.4),
+        ("sauer", 1.0),
+        ("schreit", 1.2),
+        ("geschrien", 1.2),
+        ("reicht mir", 1.3),
+    ],
+
+    "chat": [
+        ("der chat", 1.5),
+        ("mein chat", 1.4),
+        ("chat sagt", 1.4),
+        ("chat schreibt", 1.4),
+        ("chat", 1.0),
+        ("donation", 1.3),
+        ("spende", 1.2),
+        ("viewer", 1.1),
+        ("zuschauer", 1.1),
+    ],
+
+    "roast": [
+        ("hops genommen", 2.0),
+        ("zerlegt", 1.4),
+        ("roast", 1.4),
+        ("beleidigt", 1.1),
+        ("keine antwort", 1.2),
+        ("auseinander genommen", 1.7),
+        ("mundtot", 1.5),
+    ],
+
+    "sus": [
+        ("ich schwöre", 1.4),
+        ("wallah", 1.1),
+        ("vallah", 1.1),
+        ("glaub mir", 1.2),
+        ("lügst", 1.5),
+        ("gelogen", 1.5),
+        ("lüge", 1.3),
+        ("safe", 1.0),
+        ("hundert prozent", 1.2),
+    ],
+}
+
+
+def normalize_hook_context(text):
+
+    text = clean_text(
+        text
+    ).lower()
+
+    text = re.sub(
+        r"[^a-z0-9äöüß\s!?'-]",
+        " ",
+        text
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    ).strip()
+
+    return text
+
+
+def transcription_text(data):
+
+    if not isinstance(
+        data,
+        dict
+    ):
+        return ""
+
+    direct_text = clean_text(
+        data.get(
+            "text",
+            ""
+        )
+    )
+
+    if direct_text:
+        return direct_text
+
+    parts = []
+
+    for segment in data.get(
+        "segments",
+        []
+    ):
+
+        if not isinstance(
+            segment,
+            dict
+        ):
+            continue
+
+        text = clean_text(
+            segment.get(
+                "text",
+                ""
+            )
+        )
+
+        if text:
+            parts.append(
+                text
+            )
+
+    return " ".join(
+        parts
+    )
+
+
+def signal_score(
+    text,
+    signals
+):
+
+    score = 0.0
+
+    for phrase, weight in signals:
+
+        if phrase in text:
+            score += float(
+                weight
+            )
+
+    return score
+
+
+def stable_choice(
+    values,
+    seed
+):
+
+    if not values:
+        return ""
+
+    digest = hashlib.sha256(
+        str(
+            seed
+        ).encode(
+            "utf-8"
+        )
+    ).digest()
+
+    index = int.from_bytes(
+        digest[:4],
+        "big"
+    ) % len(values)
+
+    return values[
+        index
+    ]
+
+
+def hook_to_ass(text):
+
+    safe_text = escape_ass_text(
+        text
+    )
+
+    words = safe_text.split()
+
+    if len(words) <= 5:
+        return safe_text
+
+    split_at = (
+        len(words)
+        + 1
+    ) // 2
+
+    first_line = " ".join(
+        words[:split_at]
+    )
+
+    second_line = " ".join(
+        words[split_at:]
+    )
+
+    return (
+        first_line
+        + "\\N"
+        + second_line
+    )
+
+
+def create_hook(
+    data,
+    clip_title,
+    seed
+):
+
+    if not HOOKS_ENABLED:
+        return ""
+
+    spoken = normalize_hook_context(
+        transcription_text(
+            data
+        )
+    )
+
+    title = normalize_hook_context(
+        clip_title
+    )
+
+    if not spoken:
+        return ""
+
+    scores = {}
+
+    for category, signals in (
+        HOOK_SIGNALS.items()
+    ):
+
+        spoken_score = signal_score(
+            spoken,
+            signals
+        )
+
+        title_score_value = signal_score(
+            title,
+            signals
+        )
+
+        scores[
+            category
+        ] = (
+            spoken_score
+            + title_score_value * 0.65
+        )
+
+    category = max(
+        scores,
+        key=scores.get
+    )
+
+    best_score = scores[
+        category
+    ]
+
+    if best_score < HOOK_MIN_SCORE:
+
+        print(
+            "Hook ausgelassen: "
+            "kein klarer Clip-Kontext."
+        )
+
+        return ""
+
+    hook = stable_choice(
+        HOOK_BANKS.get(
+            category,
+            []
+        ),
+        (
+            str(seed)
+            + "|"
+            + category
+            + "|"
+            + spoken[:180]
+        )
+    )
+
+    hook = clean_text(
+        hook
+    ).lower()
+
+    hook_words = hook.split()
+
+    if (
+        len(hook_words) < 3
+        or len(hook_words) > 8
+    ):
+        return ""
+
+    print(
+        "Hook-Kategorie: "
+        f"{category} "
+        f"(Score {best_score:.2f})"
+    )
+
+    return hook
 
 
 # =========================================================
@@ -918,7 +1308,9 @@ def create_karaoke_text(
 
 def create_ass(
     json_file,
-    ass_file
+    ass_file,
+    clip_title="",
+    hook_seed=""
 ):
 
     ass_file = Path(
@@ -973,6 +1365,32 @@ def create_ass(
             "1"
         ),
 
+        (
+            "Style: Hook,"
+            "DejaVu Sans,"
+            "64,"
+            "&H00FFFFFF,"
+            "&H00FFFFFF,"
+            "&H00000000,"
+            "&H78000000,"
+            "-1,"
+            "0,"
+            "0,"
+            "0,"
+            "100,"
+            "100,"
+            "0,"
+            "0,"
+            "3,"
+            "4,"
+            "0,"
+            "8,"
+            "70,"
+            "70,"
+            "190,"
+            "1"
+        ),
+
         "",
 
         "[Events]",
@@ -998,7 +1416,16 @@ def create_ass(
                 )
             )
 
-        return False
+        return {
+            "has_ass_content":
+                False,
+
+            "has_subtitles":
+                False,
+
+            "hook":
+                "",
+        }
 
     json_file = Path(
         json_file
@@ -1023,7 +1450,16 @@ def create_ass(
             f"{error}"
         )
 
-        return False
+        return {
+            "has_ass_content":
+                False,
+
+            "has_subtitles":
+                False,
+
+            "hook":
+                "",
+        }
 
     words = extract_words(
         data
@@ -1032,6 +1468,47 @@ def create_ass(
     lines = list(
         header
     )
+
+    hook = create_hook(
+        data,
+        clip_title,
+        hook_seed
+    )
+
+    hook_added = False
+
+    if hook:
+
+        hook_text = hook_to_ass(
+            hook
+        )
+
+        lines.append(
+            "Dialogue: 1,"
+            "0:00:00.00,"
+            f"{ass_time(HOOK_DURATION)},"
+            "Hook,"
+            ","
+            "0,"
+            "0,"
+            "0,"
+            ","
+            "{\\fad(120,180)}"
+            f"{hook_text}"
+        )
+
+        hook_added = True
+
+        print(
+            "HOOK: "
+            + hook
+        )
+
+    else:
+
+        print(
+            "HOOK: keiner"
+        )
 
     # =====================================================
     # WORD TIMESTAMPS
@@ -1129,6 +1606,11 @@ def create_ass(
     caption_count = (
         len(lines)
         - len(header)
+        - (
+            1
+            if hook_added
+            else 0
+        )
     )
 
     with open(
@@ -1148,10 +1630,21 @@ def create_ass(
         "TikTok-Untertitelblöcke erstellt."
     )
 
-    return (
-        caption_count
-        > 0
-    )
+    return {
+        "has_ass_content":
+            (
+                caption_count > 0
+                or hook_added
+            ),
+
+        "has_subtitles":
+            (
+                caption_count > 0
+            ),
+
+        "hook":
+            hook,
+    }
 
 
 # =========================================================
@@ -1191,7 +1684,7 @@ def escape_filter_path(path):
 
 def create_filter(
     ass_file,
-    has_subtitles
+    has_ass_content
 ):
 
     filter_parts = [
@@ -1251,7 +1744,7 @@ def create_filter(
     # SUBTITLES
     # =====================================================
 
-    if has_subtitles:
+    if has_ass_content:
 
         escaped_ass = (
             escape_filter_path(
@@ -1375,10 +1868,28 @@ def process_video(
         / f"caption_{index}.ass"
     )
 
-    has_subtitles = create_ass(
+    ass_result = create_ass(
         json_file,
-        ass_file
+        ass_file,
+        clip_title,
+        (
+            source.name
+            + "|"
+            + clip_title
+        )
     )
+
+    has_ass_content = ass_result[
+        "has_ass_content"
+    ]
+
+    has_subtitles = ass_result[
+        "has_subtitles"
+    ]
+
+    hook = ass_result[
+        "hook"
+    ]
 
     print(
         "Untertitel: "
@@ -1386,6 +1897,15 @@ def process_video(
             "JA"
             if has_subtitles
             else "NEIN"
+        )
+    )
+
+    print(
+        "Hook: "
+        + (
+            hook
+            if hook
+            else "KEINER"
         )
     )
 
@@ -1398,7 +1918,7 @@ def process_video(
         final_stream
     ) = create_filter(
         ass_file,
-        has_subtitles
+        has_ass_content
     )
 
     # =====================================================
@@ -1492,6 +2012,9 @@ def process_video(
 
         "subtitles":
             has_subtitles,
+
+        "hook":
+            hook,
     }
 
 
@@ -1607,7 +2130,7 @@ def main():
     )
 
     print(
-        "CLIPCRIP2 PROCESSOR V3.1"
+        "CLIPCRIP2 PROCESSOR V3.2"
     )
 
     print(
@@ -1636,6 +2159,14 @@ def main():
 
     print(
         "- TikTok Karaoke Captions"
+    )
+
+    print(
+        "- Natuerliche Transcript-Hooks"
+    )
+
+    print(
+        "- Kein Hook bei unklarem Kontext"
     )
 
     print(
@@ -1907,6 +2438,21 @@ def main():
         f"{len(successful)}"
     )
 
+    hook_count = sum(
+        1
+        for item in successful
+        if item.get(
+            "hook",
+            ""
+        )
+    )
+
+    print(
+        f"MIT HOOK: "
+        f"{hook_count}/"
+        f"{len(successful)}"
+    )
+
     if len(
         successful
     ) != MAX_VIDEOS:
@@ -1989,7 +2535,7 @@ def main():
     )
 
     print(
-        "PROCESSOR V3.1 ERFOLGREICH"
+        "PROCESSOR V3.2 ERFOLGREICH"
     )
 
     print(
