@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
   schedule:
-    - cron: "10 6 * * *"
+    - cron: "17 6 * * *"
 
 concurrency:
   group: clipcrip2-bot
@@ -120,19 +120,15 @@ jobs:
           import time
           import urllib.parse
           import urllib.request
-          import urllib.error
+
 
           def request_with_retry(request, attempts=5):
 
               last_error = None
 
-              for attempt in range(
-                  1,
-                  attempts + 1
-              ):
+              for attempt in range(1, attempts + 1):
 
                   try:
-
                       return urllib.request.urlopen(
                           request,
                           timeout=60
@@ -308,13 +304,6 @@ jobs:
                           urllib.error.HTTPError
                       ):
 
-                          # 4xx Fehler wie 400/401/403
-                          # normalerweise nicht blind
-                          # mehrfach versuchen.
-                          #
-                          # 408, 429 und 5xx dürfen
-                          # erneut versucht werden.
-
                           if (
                               error.code
                               not in (
@@ -346,13 +335,11 @@ jobs:
                                   )
 
                               except Exception:
-
                                   pass
 
                               raise
 
                       if attempt >= attempts:
-
                           break
 
                       wait = min(
@@ -369,9 +356,7 @@ jobs:
                           "und versuche es erneut..."
                       )
 
-                      time.sleep(
-                          wait
-                      )
+                      time.sleep(wait)
 
               raise RuntimeError(
                   f"{description} nach "
@@ -400,11 +385,9 @@ jobs:
           if len(files) != 5:
 
               raise RuntimeError(
-
                   "Es müssen genau 5 fertige "
                   "MP4-Dateien vorhanden sein. "
                   f"Gefunden: {len(files)}"
-
               )
 
 
@@ -425,7 +408,6 @@ jobs:
           def auth_headers():
 
               return {
-
                   "Authorization":
                       f"Bearer {token}",
 
@@ -434,7 +416,6 @@ jobs:
 
                   "Connection":
                       "close",
-
               }
 
 
@@ -442,9 +423,7 @@ jobs:
           # DATEI SUCHEN
           # ======================================
 
-          def find_existing(
-              filename
-          ):
+          def find_existing(filename):
 
               safe_filename = (
                   filename
@@ -460,21 +439,16 @@ jobs:
 
 
               query = (
-
                   f"name='{safe_filename}' "
                   f"and '{folder_id}' in parents "
                   "and trashed=false"
-
               )
 
 
               list_url = (
-
                   "https://www.googleapis.com/"
                   "drive/v3/files?"
-
                   + urllib.parse.urlencode({
-
                       "q":
                           query,
 
@@ -483,33 +457,23 @@ jobs:
 
                       "spaces":
                           "drive",
-
                   })
-
               )
 
 
               def make_request():
 
                   return urllib.request.Request(
-
                       list_url,
-
                       headers=auth_headers(),
-
                   )
 
 
               with request_with_retry(
-
                   make_request,
-
                   f"Drive-Suche für {filename}",
-
                   attempts=6,
-
                   timeout=60
-
               ) as response:
 
                   result = json.load(
@@ -533,40 +497,28 @@ jobs:
           ):
 
               url = (
-
                   "https://www.googleapis.com/"
                   "drive/v3/files/"
                   + file_id
-
               )
 
 
               def make_request():
 
                   return urllib.request.Request(
-
                       url,
-
                       method="DELETE",
-
                       headers=auth_headers(),
-
                   )
 
 
               with request_with_retry(
-
                   make_request,
-
                   f"Alte Drive-Datei löschen: "
                   f"{filename}",
-
                   attempts=6,
-
                   timeout=60
-
               ):
-
                   pass
 
 
@@ -581,13 +533,11 @@ jobs:
           ):
 
               metadata = {
-
                   "name":
                       filename,
 
                   "parents":
                       [folder_id],
-
               }
 
 
@@ -608,31 +558,22 @@ jobs:
 
 
               upload_url = (
-
                   "https://www.googleapis.com/"
                   "upload/drive/v3/files"
                   "?uploadType=multipart"
                   "&fields=id,name,size"
-
               )
 
 
               def make_request():
 
-                  # WICHTIG:
-                  # Bei jedem Retry neue Boundary
-                  # und neuen Request erstellen.
-
                   boundary = (
-
                       "clipcrip2_"
                       + uuid.uuid4().hex
-
                   )
 
 
                   header = (
-
                       f"--{boundary}\r\n"
 
                       "Content-Type: "
@@ -649,35 +590,29 @@ jobs:
 
                       f"Content-Type: "
                       f"{mime_type}\r\n\r\n"
-
                   ).encode(
                       "utf-8"
                   )
 
 
                   footer = (
-
                       f"\r\n"
                       f"--{boundary}--\r\n"
-
                   ).encode(
                       "utf-8"
                   )
 
 
                   body = (
-
                       header
                       + video_data
                       + footer
-
                   )
 
 
                   headers = auth_headers()
 
                   headers.update({
-
                       "Content-Type":
                           "multipart/related; "
                           f"boundary={boundary}",
@@ -686,33 +621,22 @@ jobs:
                           str(
                               len(body)
                           ),
-
                   })
 
 
                   return urllib.request.Request(
-
                       upload_url,
-
                       data=body,
-
                       method="POST",
-
                       headers=headers,
-
                   )
 
 
               with request_with_retry(
-
                   make_request,
-
                   f"Upload von {filename}",
-
                   attempts=6,
-
                   timeout=300
-
               ) as response:
 
                   return json.load(
@@ -738,13 +662,10 @@ jobs:
 
 
               mime_type = (
-
                   mimetypes.guess_type(
                       filename
                   )[0]
-
                   or "video/mp4"
-
               )
 
 
@@ -766,10 +687,6 @@ jobs:
               )
 
 
-              # ----------------------------------
-              # VORHANDENE DATEIEN FINDEN
-              # ----------------------------------
-
               existing = find_existing(
                   filename
               )
@@ -789,14 +706,7 @@ jobs:
                   )
 
 
-              # ----------------------------------
-              # NEUES VIDEO ZUERST HOCHLADEN
-              #
-              # Wichtig:
-              # Wir löschen die alte Version
-              # NICHT bevor sicher ist, dass der
-              # neue Upload funktioniert.
-              # ----------------------------------
+              # Neue Version zuerst hochladen.
 
               print(
                   "Neue Version wird hochgeladen..."
@@ -804,11 +714,9 @@ jobs:
 
 
               uploaded = upload_video(
-
                   path,
                   filename,
                   mime_type
-
               )
 
 
@@ -825,9 +733,8 @@ jobs:
               )
 
 
-              # ----------------------------------
-              # ERST JETZT ALTE VERSIONEN LÖSCHEN
-              # ----------------------------------
+              # Erst nach erfolgreichem Upload
+              # alte Versionen löschen.
 
               for old in existing:
 
@@ -845,7 +752,6 @@ jobs:
                       not old_id
                       or old_id == new_id
                   ):
-
                       continue
 
 
@@ -861,9 +767,7 @@ jobs:
                   )
 
 
-              # ----------------------------------
-              # KONTROLLE
-              # ----------------------------------
+              # Upload kontrollieren.
 
               verification = find_existing(
                   filename
@@ -871,24 +775,20 @@ jobs:
 
 
               matching_new = [
-
                   item
                   for item in verification
                   if item.get(
                       "id"
                   ) == new_id
-
               ]
 
 
               if not matching_new:
 
                   raise RuntimeError(
-
                       "Drive-Verifikation "
                       "fehlgeschlagen für "
                       + filename
-
                   )
 
 
@@ -902,10 +802,6 @@ jobs:
               )
 
 
-              # Kleine Pause zwischen Uploads,
-              # damit nicht 5 große Requests
-              # unmittelbar hintereinander kommen.
-
               if index < len(files):
 
                   print(
@@ -913,9 +809,7 @@ jobs:
                       "dem nächsten Upload..."
                   )
 
-                  time.sleep(
-                      3
-                  )
+                  time.sleep(3)
 
 
           # ======================================
@@ -925,11 +819,9 @@ jobs:
           if uploaded_count != 5:
 
               raise RuntimeError(
-
                   "Nicht alle Videos wurden "
                   "erfolgreich hochgeladen. "
                   f"Erfolg: {uploaded_count}/5"
-
               )
 
 
