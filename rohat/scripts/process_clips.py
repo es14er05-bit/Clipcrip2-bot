@@ -58,8 +58,13 @@ def main():
         ROHAT_ROOT / "clips_today.json"
     )
 
+    core.SELECTION_REPORT_FILE = (
+        ROHAT_ROOT / "selection_report.json"
+    )
+
     core.OUTPUT_PREFIX = "rohat_clipcrip4_tiktok"
     core.WATERMARK = "@clipcrip4"
+    core.STREAMER_NAME = "Rohat"
     core.BASE_PROMPT = ROHAT_WHISPER_PROMPT
 
     print("")

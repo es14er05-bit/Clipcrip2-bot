@@ -58,11 +58,17 @@ def main():
         GIGGAND_ROOT / "clips_today.json"
     )
 
+    core.SELECTION_REPORT_FILE = (
+        GIGGAND_ROOT / "selection_report.json"
+    )
+
     core.OUTPUT_PREFIX = (
         "giggand_clipcrip5_tiktok"
     )
 
     core.WATERMARK = "@clipcrip5"
+
+    core.STREAMER_NAME = "Giggand"
 
     core.BASE_PROMPT = (
         GIGGAND_WHISPER_PROMPT

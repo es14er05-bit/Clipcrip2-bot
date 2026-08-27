@@ -52,13 +52,27 @@ def main():
         ROHAT_ROOT / "clip_history.json"
     )
 
+    core.REPORT_FILE = str(
+        ROHAT_ROOT / "selection_report.json"
+    )
+
+    core.STREAMER_NAME = "Rohat"
+
+    core.WHISPER_PROMPT = (
+        "Deutscher Twitch-Stream von Rohat bzw. xrohat. "
+        "Die Sprecher reden schnell, locker und umgangssprachlich. "
+        "Namen und Wörter: Rohat, xrohat, Chat, Bro, Bruder, Digga, "
+        "Wallah, crashout. Transkribiere wortgetreu und behalte "
+        "Jugendsprache bei."
+    )
+
     print("")
     print("==========================================")
     print("CLIPCRIP4 ROHAT – QUALITY CONTROL")
     print("==========================================")
 
     print(
-        "QC-Engine: identisch mit ClipCrip2"
+        "QC-Engine: gemeinsame Viral Quality Gate V3"
     )
 
     print(

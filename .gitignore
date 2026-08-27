@@ -1,0 +1,9 @@
+**/__pycache__/
+*.py[cod]
+**/downloaded_clips/
+**/selected_clips/
+**/tiktok_ready/
+**/clips_today.json
+**/selection_report.json
+**/publish_manifest.json
+*.pt

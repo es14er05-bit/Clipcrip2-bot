@@ -1,0 +1,163 @@
+name: Shared ClipCrip Engine
+
+'on':
+  workflow_call:
+    inputs:
+      streamer_label:
+        required: true
+        type: string
+      discovery_script:
+        required: true
+        type: string
+      download_script:
+        required: true
+        type: string
+      quality_script:
+        required: true
+        type: string
+      process_script:
+        required: true
+        type: string
+      output_dir:
+        required: true
+        type: string
+      used_file:
+        required: true
+        type: string
+      history_file:
+        required: true
+        type: string
+      drive_folder_id:
+        required: true
+        type: string
+      artifact_name:
+        required: true
+        type: string
+      bot_name:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clipcrip-shared-engine-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  produce:
+    name: ${{ inputs.streamer_label }} produzieren
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    steps:
+      - name: Repository laden
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Whisper-Modell cachen
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/whisper
+          key: whisper-turbo-${{ runner.os }}-v1
+
+      - name: Abhängigkeiten installieren
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-liberation
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Kandidaten finden
+        env:
+          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
+          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
+        run: python "${{ inputs.discovery_script }}"
+
+      - name: Kandidaten herunterladen
+        run: python "${{ inputs.download_script }}"
+
+      - name: Viral Quality Gate
+        run: python "${{ inputs.quality_script }}"
+
+      - name: Retention-optimierte Videos rendern
+        run: python "${{ inputs.process_script }}"
+
+      - name: Variable Ausgabe validieren
+        env:
+          ENGINE_OUTPUT_DIR: ${{ inputs.output_dir }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          output_dir = Path(os.environ["ENGINE_OUTPUT_DIR"])
+          videos = sorted(output_dir.glob("*.mp4"))
+          manifest_path = output_dir / "publish_manifest.json"
+
+          if not manifest_path.exists():
+              raise SystemExit("publish_manifest.json fehlt.")
+
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          expected = int(manifest.get("output_count", -1))
+
+          print(f"Finale Videos: {len(videos)}")
+          print(f"Manifest-Status: {manifest.get('status')}")
+
+          if not 0 <= len(videos) <= 3:
+              raise SystemExit(f"Erwartet 0 bis 3 Videos, gefunden: {len(videos)}")
+
+          if expected != len(videos):
+              raise SystemExit(
+                  f"Manifest erwartet {expected}, im Ordner liegen {len(videos)} Videos."
+              )
+
+          for video in videos:
+              if video.stat().st_size < 100_000:
+                  raise SystemExit(f"Output zu klein: {video}")
+              print(f"OK: {video.name} | {video.stat().st_size / 1024 / 1024:.1f} MB")
+          PY
+
+      - name: Ergebnis als GitHub Artifact speichern
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: ${{ inputs.output_dir }}/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Starke Videos zu Google Drive hochladen
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          DRIVE_FOLDER_ID: ${{ inputs.drive_folder_id }}
+          OUTPUT_DIR: ${{ inputs.output_dir }}
+        run: python scripts/drive_upload.py
+
+      - name: Verwendete Clips atomar speichern
+        env:
+          USED_FILE: ${{ inputs.used_file }}
+          HISTORY_FILE: ${{ inputs.history_file }}
+          BOT_NAME: ${{ inputs.bot_name }}
+        run: |
+          git config user.name "$BOT_NAME"
+          git config user.email "clipcrip-engine@users.noreply.github.com"
+          git add "$USED_FILE" "$HISTORY_FILE"
+
+          if git diff --cached --quiet; then
+            echo "Keine neue History zu speichern."
+            exit 0
+          fi
+
+          git commit -m "Update $BOT_NAME clip history"
+          git pull --rebase origin main
+          git push origin HEAD:main

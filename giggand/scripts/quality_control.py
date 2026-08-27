@@ -52,6 +52,19 @@ def main():
         GIGGAND_ROOT / "clip_history.json"
     )
 
+    core.REPORT_FILE = str(
+        GIGGAND_ROOT / "selection_report.json"
+    )
+
+    core.STREAMER_NAME = "Giggand"
+
+    core.WHISPER_PROMPT = (
+        "Deutscher Twitch-Stream von Giggand. Die Sprecher reden schnell, "
+        "locker und umgangssprachlich. Namen und Wörter: Giggand, Chat, "
+        "Bro, Bruder, Digga, Wallah, crashout. Transkribiere wortgetreu "
+        "und behalte Jugendsprache bei."
+    )
+
     print("")
     print(
         "=========================================="
@@ -63,7 +76,7 @@ def main():
         "=========================================="
     )
     print(
-        "QC-Engine: identisch mit ClipCrip2/Rohat"
+        "QC-Engine: gemeinsame Viral Quality Gate V3"
     )
     print(
         "Eigene Giggand-History: "
