@@ -64,9 +64,11 @@ def main():
         clips = json.load(file)
 
     if not clips:
-        raise RuntimeError(
-            "clips_today.json ist leer."
+        print(
+            "Keine frischen Kandidaten. "
+            "Download endet erfolgreich ohne Füllmaterial."
         )
+        return
 
     print(
         f"{len(clips)} Kandidaten werden "

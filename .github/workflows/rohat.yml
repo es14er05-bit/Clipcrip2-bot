@@ -1,171 +1,23 @@
 name: ClipCrip4 Rohat Bot
 
-on:
+'on':
   workflow_dispatch:
-
   schedule:
     - cron: "34 6 * * *"
 
-concurrency:
-  group: clipcrip4-rohat-bot
-  cancel-in-progress: false
-
-permissions:
-  contents: write
-
 jobs:
-  rohat-clips:
-    runs-on: ubuntu-latest
-
-    steps:
-
-      # ==========================================
-      # REPOSITORY
-      # ==========================================
-
-      - name: Repository laden
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # ==========================================
-      # PYTHON
-      # ==========================================
-
-      - name: Python einrichten
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # ==========================================
-      # ABHÄNGIGKEITEN
-      # ==========================================
-
-      - name: Abhängigkeiten installieren
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-          python -m pip install --upgrade pip
-
-          pip install \
-            requests \
-            yt-dlp \
-            openai-whisper \
-            ultralytics \
-            opencv-python-headless \
-            numpy
-
-      # ==========================================
-      # 1. ROHAT TWITCH CLIPS FINDEN
-      # ==========================================
-
-      - name: Rohat Twitch Clips finden
-        env:
-          TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
-          TWITCH_CLIENT_SECRET: ${{ secrets.TWITCH_CLIENT_SECRET }}
-        run: |
-          python rohat/scripts/get_clips.py
-
-      # ==========================================
-      # 2. ROHAT CLIPS HERUNTERLADEN
-      # ==========================================
-
-      - name: Rohat Twitch Clips herunterladen
-        run: |
-          python rohat/scripts/download_clips.py
-
-      # ==========================================
-      # 3. QUALITÄTSKONTROLLE
-      # ==========================================
-
-      - name: Rohat Multi-Stage Quality Control
-        run: |
-          python rohat/scripts/quality_control.py
-
-      # ==========================================
-      # 4. TIKTOK VIDEOS ERSTELLEN
-      # ==========================================
-
-      - name: Rohat TikTok Videos für @clipcrip4 erstellen
-        run: |
-          python rohat/scripts/process_clips.py
-
-      # ==========================================
-      # 5. GENAU 5 VIDEOS PRÜFEN
-      # ==========================================
-
-      - name: Genau 5 fertige Rohat Videos prüfen
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          files = sorted(
-              Path("rohat/tiktok_ready").glob("*.mp4")
-          )
-
-          print(
-              f"{len(files)} fertige MP4-Dateien gefunden."
-          )
-
-          for file in files:
-              print(file)
-
-          if len(files) != 5:
-              raise SystemExit(
-                  "FEHLER: Es müssen genau 5 fertige "
-                  f"Videos vorhanden sein, gefunden: {len(files)}"
-              )
-
-          print(
-              "Rohat Output-Prüfung erfolgreich: 5/5."
-          )
-          PY
-
-      # ==========================================
-      # 6. GITHUB ARTIFACT
-      # ==========================================
-
-      - name: Rohat TikTok Videos als GitHub Artifact speichern
-        uses: actions/upload-artifact@v4
-        with:
-          name: Rohat-ClipCrip4-TikTok-Clips
-          path: rohat/tiktok_ready/
-          if-no-files-found: error
-          retention-days: 7
-
-      # ==========================================
-      # 7. GOOGLE DRIVE
-      # ==========================================
-
-      - name: Rohat Videos zu Google Drive hochladen
-        env:
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
-          DRIVE_FOLDER_ID: "17EWSohhCaEYXvjzrQBgWIR9Ld5kHKaye"
-        run: |
-          python rohat/scripts/drive_upload.py
-
-      # ==========================================
-      # 8. CLIP HISTORY DAUERHAFT SPEICHERN
-      # ==========================================
-
-      - name: Rohat Clip History dauerhaft speichern
-        run: |
-          git config user.name "clipcrip4-bot"
-          git config user.email "clipcrip4-bot@users.noreply.github.com"
-
-          git add \
-            rohat/used_clips.json \
-            rohat/clip_history.json
-
-          if git diff --cached --quiet; then
-            echo "Keine neue Rohat-History zum Speichern."
-            exit 0
-          fi
-
-          git commit -m "Update Rohat ClipCrip4 clip history"
-
-          git pull --rebase origin main
-          git push origin HEAD:main
+  rohat:
+    uses: ./.github/workflows/_clip-engine.yml
+    with:
+      streamer_label: Rohat
+      discovery_script: rohat/scripts/get_clips.py
+      download_script: rohat/scripts/download_clips.py
+      quality_script: rohat/scripts/quality_control.py
+      process_script: rohat/scripts/process_clips.py
+      output_dir: rohat/tiktok_ready
+      used_file: rohat/used_clips.json
+      history_file: rohat/clip_history.json
+      drive_folder_id: 17EWSohhCaEYXvjzrQBgWIR9Ld5kHKaye
+      artifact_name: Rohat-ClipCrip4-Quality-Clips
+      bot_name: clipcrip4-bot
+    secrets: inherit
