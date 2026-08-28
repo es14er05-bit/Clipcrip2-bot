@@ -1,10 +1,10 @@
-"""Content-aware quality gate shared by all ClipCrip streamers.
+"""Precision-first content gate shared by all ClipCrip streamers.
 
 The gate intentionally returns a variable number of videos. Zero strong clips
 is a valid, green result; weak material is never added just to hit a quota.
-Cheap media analysis runs across the full pool, Whisper is loaded once for the
-best candidates, and the final score combines the opening, speech, reactions,
-audio, motion, recency and Twitch signals.
+Cheap media analysis runs across the full pool, Whisper is loaded once for a
+balanced shortlist, and a transcript-backed content gate decides whether a
+clip contains an actual moment. Loud, continuous speech is never sufficient.
 """
 
 from __future__ import annotations
@@ -41,10 +41,10 @@ WHISPER_PROMPT = (
 )
 
 MAX_FINAL_COUNT = 3
-SEMANTIC_POOL_SIZE = 10
-MIN_VIRAL_SCORE = 66.0
-MIN_FALLBACK_SCORE = 62.0
-MAX_OUTPUT_DURATION = 42.0
+SEMANTIC_POOL_SIZE = 14
+MIN_VIRAL_SCORE = 68.0
+MAX_OUTPUT_DURATION = 30.0
+TARGET_EVENT_DURATION = 22.0
 MIN_OUTPUT_DURATION = 10.0
 
 SAMPLE_COUNT = 15
@@ -151,6 +151,32 @@ STOPWORDS = {
 }
 
 GENERIC_TITLES = {"", "clip", "clips", "lol", "haha", "hahaha", "w", "l"}
+
+# These are not banned topics. They are signals that the clip is mostly an
+# announcement, follow request or stream administration instead of a payoff.
+# A genuinely strong reaction can still override a weak single signal, but the
+# run-65 follow/upload clips are intentionally rejected.
+PROMO_SIGNALS: list[tuple[str, float]] = [
+    ("morgen neuer upload", 4.5),
+    ("neuer upload", 3.5),
+    ("neues video", 2.5),
+    ("video abchecken", 3.0),
+    ("alle einmal folgen", 4.0),
+    ("einfolgen", 4.0),
+    ("folgt ihm", 3.5),
+    ("folgt alle", 3.5),
+    ("followt", 3.0),
+    ("abo da lassen", 3.5),
+    ("abonnieren", 3.0),
+    ("link in bio", 4.0),
+    ("grußvideo", 3.5),
+    ("grussvideo", 3.5),
+    ("spenden aus", 3.0),
+    ("miete zahlen", 2.5),
+    ("werbung", 2.5),
+    ("sponsor", 2.5),
+    ("gewinnspiel", 3.0),
+]
 
 
 def load_json(path: str | Path, default: Any) -> Any:
@@ -550,11 +576,14 @@ def preliminary_score(result: dict[str, Any]) -> tuple[float, dict[str, float], 
     metadata = result["metadata"]
     warnings: list[str] = []
 
-    metadata_points = min(15.0, float(metadata.get("metadata_score", 0.0)) / 5.5)
-    energy_points = float(audio.get("energy", 0.0)) * 8.0
-    peak_points = float(audio.get("peakiness", 0.0)) * 12.0
-    activity_points = float(audio.get("activity", 0.0)) * 10.0
-    opening_points = float(audio.get("opening_activity", 0.0)) * 8.0
+    # Twitch audio is commonly normalized and made the old values saturate at
+    # 1.0. Keep media signals useful for triage, but cap their influence. The
+    # transcript-backed content gate below owns the publish decision.
+    metadata_points = min(20.0, float(metadata.get("metadata_score", 0.0)) / 2.7)
+    energy_points = float(audio.get("energy", 0.0)) * 4.0
+    peak_points = float(audio.get("peakiness", 0.0)) * 8.0
+    activity_points = float(audio.get("activity", 0.0)) * 4.0
+    opening_points = float(audio.get("opening_activity", 0.0)) * 4.0
     motion_points = min(1.0, float(motion.get("peak", 0.0)) / 24.0) * 8.0
     face_points = min(
         1.0,
@@ -703,15 +732,118 @@ def score_signals(text: str) -> dict[str, float]:
     }
 
 
+def phrase_score(text: str, signals: list[tuple[str, float]]) -> float:
+    normalized = normalize_text(text)
+    return sum(weight for phrase, weight in signals if phrase in normalized)
+
+
+def audience_quality(metadata: dict[str, Any]) -> float:
+    """Return a streamer-independent 0..1 audience-evidence score."""
+
+    breakdown = metadata.get("metadata_score_breakdown", {})
+    if not isinstance(breakdown, dict):
+        breakdown = {}
+    views = min(1.0, max(0.0, float(breakdown.get("views", 0.0))) / 24.0)
+    velocity = min(
+        1.0, max(0.0, float(breakdown.get("view_velocity", 0.0))) / 18.0
+    )
+    return views * 0.60 + velocity * 0.40
+
+
+def meaningful_title(value: Any) -> bool:
+    title = normalize_text(value)
+    words = title.split()
+    return title not in GENERIC_TITLES and len(title) >= 7 and 2 <= len(words) <= 10
+
+
+def strongest_segment_signal(
+    candidate: dict[str, Any], category: str = ""
+) -> tuple[float, float | None]:
+    transcript = candidate.get("transcript") or {}
+    best_score = 0.0
+    best_time: float | None = None
+    for segment in transcript.get("segments", []) if isinstance(transcript, dict) else []:
+        scores = score_signals(str(segment.get("text", "")))
+        score = scores.get(category, 0.0) if category else max(scores.values(), default=0.0)
+        if score > best_score:
+            best_score = score
+            best_time = (
+                float(segment.get("start", 0.0)) + float(segment.get("end", 0.0))
+            ) / 2
+    return best_score, best_time
+
+
+def evaluate_content_gate(candidate: dict[str, Any]) -> tuple[bool, str, dict[str, Any]]:
+    """Demand evidence of a real, understandable moment before publishing."""
+
+    text = str(candidate.get("transcript_text", ""))
+    words = normalize_text(text).split()
+    metadata = candidate["metadata"]
+    duration = float(candidate["info"]["duration"])
+    category = str(candidate.get("category", ""))
+    transcript_strength = float(candidate.get("transcript_category_strength", 0.0))
+    title_strength = float(candidate.get("title_category_strength", 0.0))
+    event_score, event_time = strongest_segment_signal(candidate, category)
+    promo_strength = phrase_score(text, PROMO_SIGNALS)
+    audience = audience_quality(metadata)
+    try:
+        views = int(metadata.get("view_count", 0) or 0)
+    except (TypeError, ValueError):
+        views = 0
+
+    reaction_route = transcript_strength >= 4.5 or (
+        transcript_strength >= 3.5 and title_strength >= 2.0
+    )
+    audience_route = (
+        audience >= 0.68
+        and views >= 500
+        and meaningful_title(metadata.get("title", ""))
+        and duration <= 40.0
+    )
+
+    details = {
+        "reaction_route": reaction_route,
+        "audience_route": audience_route,
+        "audience_quality": round(audience, 3),
+        "transcript_reaction": round(transcript_strength, 3),
+        "title_reaction": round(title_strength, 3),
+        "event_score": round(event_score, 3),
+        "event_time": None if event_time is None else round(event_time, 3),
+        "promo_strength": round(promo_strength, 3),
+        "word_count": len(words),
+    }
+
+    if len(words) < 10 or float(candidate.get("speech_ratio", 0.0)) < 0.18:
+        return False, "zu wenig verständlicher Inhalt", details
+    if promo_strength >= 3.5 and transcript_strength < 6.5:
+        return False, "hauptsächlich Follow-, Upload- oder Stream-Logistik", details
+    if not reaction_route and not audience_route:
+        return False, "kein klarer starker Moment oder belastbares Zuschauer-Signal", details
+    if reaction_route and event_time is not None and event_time > duration - 1.8:
+        return False, "Reaktion kommt erst am Ende; kein sichtbarer Payoff", details
+    if duration > 34.0 and not reaction_route and audience < 0.78:
+        return False, "zu lang und ohne klar lokalisierbares Ereignis", details
+    return True, "reaction" if reaction_route else "audience_proven", details
+
+
 def semantic_analysis(candidate: dict[str, Any]) -> tuple[float, dict[str, float]]:
     transcript = candidate.get("transcript") or {"text": "", "segments": []}
     text = str(transcript.get("text", ""))
     normalized = normalize_text(text)
     words = normalized.split()
     segments = transcript.get("segments", []) if isinstance(transcript, dict) else []
-    signal_scores = score_signals(text + " " + str(candidate["metadata"].get("title", "")))
-    category = max(signal_scores, key=signal_scores.get) if signal_scores else ""
-    category_strength = signal_scores.get(category, 0.0) if category else 0.0
+    title = str(candidate["metadata"].get("title", ""))
+    transcript_scores = score_signals(text)
+    title_scores = score_signals(title)
+    combined_scores = {
+        category: transcript_scores.get(category, 0.0)
+        + min(2.0, title_scores.get(category, 0.0) * 0.60)
+        for category in CATEGORY_SIGNALS
+    }
+    category = max(combined_scores, key=combined_scores.get) if combined_scores else ""
+    category_strength = combined_scores.get(category, 0.0) if category else 0.0
+    transcript_strength = transcript_scores.get(category, 0.0) if category else 0.0
+    title_strength = title_scores.get(category, 0.0) if category else 0.0
 
     first_speech = 999.0
     last_speech = 0.0
@@ -729,29 +861,55 @@ def semantic_analysis(candidate: dict[str, Any]) -> tuple[float, dict[str, float
 
     duration = max(float(candidate["info"]["duration"]), 0.1)
     speech_ratio = min(1.0, speech_seconds / duration)
-    reaction_points = min(18.0, category_strength * 3.0)
-    context_points = min(6.0, len(words) / 8.0)
-    speech_points = min(6.0, speech_ratio * 8.0)
-    opening_points = 4.0 if first_speech <= 0.65 else max(0.0, 4.0 - first_speech * 1.6)
-    diversity_points = min(2.0, len(content_tokens(text)) / 18.0)
-    semantic_points = (
-        reaction_points + context_points + speech_points + opening_points + diversity_points
-    )
+    reaction_points = min(22.0, transcript_strength * 3.0)
+    context_points = min(4.0, len(words) / 12.0)
+    speech_points = min(3.0, speech_ratio * 4.0)
+    opening_points = 3.0 if first_speech <= 0.65 else max(0.0, 3.0 - first_speech * 1.2)
+    diversity_points = min(1.5, len(content_tokens(text)) / 20.0)
+    audience_points = audience_quality(candidate["metadata"]) * 8.0
 
     candidate["transcript_text"] = text
     candidate["category"] = category if category_strength >= 2.2 else ""
     candidate["category_strength"] = category_strength
+    candidate["transcript_category_strength"] = transcript_strength
+    candidate["title_category_strength"] = title_strength
     candidate["speech_start"] = 0.0 if first_speech == 999.0 else first_speech
     candidate["speech_end"] = last_speech
     candidate["speech_ratio"] = speech_ratio
-    candidate["signal_scores"] = signal_scores
+    candidate["signal_scores"] = combined_scores
 
     if len(words) < 5 and float(candidate["audio"].get("peakiness", 0.0)) < 0.70:
-        semantic_points -= 12.0
         candidate["warnings"].append("zu wenig verständlicher Inhalt")
     if first_speech > 1.6:
-        semantic_points -= min(10.0, (first_speech - 1.6) * 3.0)
         candidate["warnings"].append("Sprache startet zu spät")
+
+    gate_passed, gate_reason, gate_details = evaluate_content_gate(candidate)
+    candidate["content_gate_passed"] = gate_passed
+    candidate["content_gate_reason"] = gate_reason
+    candidate["content_gate"] = gate_details
+
+    event_bonus = 6.0 if gate_passed and gate_reason == "reaction" else 0.0
+    if gate_passed and gate_reason == "audience_proven":
+        event_bonus = 4.0
+    promo_penalty = min(20.0, float(gate_details["promo_strength"]) * 3.0)
+    ramble_penalty = 8.0 if duration > 32.0 and transcript_strength < 4.0 else 0.0
+    late_speech_penalty = (
+        min(10.0, (first_speech - 1.6) * 3.0) if first_speech > 1.6 else 0.0
+    )
+    semantic_points = (
+        reaction_points
+        + context_points
+        + speech_points
+        + opening_points
+        + diversity_points
+        + audience_points
+        + event_bonus
+        - promo_penalty
+        - ramble_penalty
+        - late_speech_penalty
+    )
+    if not gate_passed:
+        candidate["warnings"].append("Content Gate: " + gate_reason)
 
     breakdown = {
         "reaction": reaction_points,
@@ -759,6 +917,11 @@ def semantic_analysis(candidate: dict[str, Any]) -> tuple[float, dict[str, float
         "speech": speech_points,
         "spoken_opening": opening_points,
         "word_diversity": diversity_points,
+        "audience_evidence": audience_points,
+        "event_bonus": event_bonus,
+        "promo_penalty": -promo_penalty,
+        "ramble_penalty": -ramble_penalty,
+        "late_speech_penalty": -late_speech_penalty,
     }
     return round(semantic_points, 3), {
         key: round(value, 3) for key, value in breakdown.items()
@@ -766,16 +929,7 @@ def semantic_analysis(candidate: dict[str, Any]) -> tuple[float, dict[str, float
 
 
 def strongest_segment_time(candidate: dict[str, Any]) -> float | None:
-    transcript = candidate.get("transcript") or {}
-    best_score = 0.0
-    best_time: float | None = None
-    for segment in transcript.get("segments", []) if isinstance(transcript, dict) else []:
-        segment_scores = score_signals(str(segment.get("text", "")))
-        score = max(segment_scores.values(), default=0.0)
-        if score > best_score:
-            best_score = score
-            best_time = (float(segment.get("start", 0.0)) + float(segment.get("end", 0.0))) / 2
-    return best_time
+    return strongest_segment_signal(candidate, str(candidate.get("category", "")))[1]
 
 
 def choose_trim_window(candidate: dict[str, Any]) -> tuple[float, float]:
@@ -787,26 +941,51 @@ def choose_trim_window(candidate: dict[str, Any]) -> tuple[float, float]:
     if speech_end > 0.0 and duration - speech_end > 1.0:
         end = min(duration, speech_end + 0.65)
 
-    if end - start <= MAX_OUTPUT_DURATION:
+    event_time = strongest_segment_time(candidate)
+    if end - start <= MAX_OUTPUT_DURATION and event_time is None:
         if end - start < MIN_OUTPUT_DURATION:
             end = min(duration, start + MIN_OUTPUT_DURATION)
             start = max(0.0, end - MIN_OUTPUT_DURATION)
         return round(start, 3), round(end, 3)
 
-    event_time = strongest_segment_time(candidate)
     if event_time is None:
         event_time = float(candidate["audio"].get("peak_time", duration / 2.0))
-    start = max(0.0, min(duration - MAX_OUTPUT_DURATION, event_time - 10.0))
+    target_duration = min(MAX_OUTPUT_DURATION, max(MIN_OUTPUT_DURATION, TARGET_EVENT_DURATION))
+    start = max(0.0, min(duration - target_duration, event_time - 7.0))
     if speech_start > start and speech_start - start < 2.0:
         start = max(0.0, speech_start - 0.35)
-    end = min(duration, start + MAX_OUTPUT_DURATION)
+    end = min(duration, start + target_duration)
     return round(start, 3), round(end, 3)
 
 
 def enrich_with_transcripts(analyzed: list[dict[str, Any]]) -> bool:
     pool = [item for item in analyzed if not item["hard_reject"]]
-    pool.sort(key=lambda item: item["preliminary_score"], reverse=True)
-    pool = pool[:SEMANTIC_POOL_SIZE]
+    by_media = sorted(pool, key=lambda item: item["preliminary_score"], reverse=True)
+    by_audience = sorted(
+        pool,
+        key=lambda item: (
+            float(item["metadata"].get("metadata_score", 0.0)),
+            int(item["metadata"].get("view_count", 0) or 0),
+        ),
+        reverse=True,
+    )
+    balanced: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index in range(max(len(by_media), len(by_audience))):
+        for ranking in (by_audience, by_media):
+            if index >= len(ranking):
+                continue
+            item = ranking[index]
+            identity = str(item["metadata"].get("id", item["path"]))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            balanced.append(item)
+            if len(balanced) >= SEMANTIC_POOL_SIZE:
+                break
+        if len(balanced) >= SEMANTIC_POOL_SIZE:
+            break
+    pool = balanced
     if not pool:
         return False
 
@@ -840,7 +1019,7 @@ def enrich_with_transcripts(analyzed: list[dict[str, Any]]) -> bool:
 def select_candidates(
     analyzed: list[dict[str, Any]], history: dict[str, Any], transcripts_available: bool
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    threshold = MIN_VIRAL_SCORE if transcripts_available else MIN_FALLBACK_SCORE
+    threshold = MIN_VIRAL_SCORE
     for candidate in analyzed:
         candidate.setdefault("viral_score", candidate["preliminary_score"])
         candidate.setdefault("semantic_score", 0.0)
@@ -854,10 +1033,16 @@ def select_candidates(
         reason = ""
         if candidate["hard_reject"]:
             reason = "Hard Reject"
+        elif not transcripts_available:
+            reason = "Whisper nicht verfügbar; keine blinde Veröffentlichung"
+        elif not candidate.get("transcript"):
+            reason = "nicht im ausgewogenen semantischen Prüfpool"
+        elif not candidate.get("content_gate_passed", False):
+            reason = "Content Gate: " + str(
+                candidate.get("content_gate_reason", "kein klarer Moment")
+            )
         elif candidate["viral_score"] < threshold:
             reason = f"unter Mindestscore {threshold:.1f}"
-        elif transcripts_available and not candidate.get("transcript"):
-            reason = "nicht im semantischen Top-Pool"
         else:
             for existing in selected:
                 duplicate = duplicate_reason(candidate, history_entry(existing))
@@ -872,6 +1057,8 @@ def select_candidates(
                     if duplicate:
                         reason = f"History-Duplikat {old_id}: {duplicate}"
                         break
+            if not reason and len(selected) >= MAX_FINAL_COUNT:
+                reason = "qualifiziert, aber außerhalb der stärksten Top 3"
 
         if reason:
             rejected.append(
@@ -879,15 +1066,20 @@ def select_candidates(
                     "id": candidate["metadata"].get("id", ""),
                     "title": candidate["metadata"].get("title", ""),
                     "viral_score": round(float(candidate["viral_score"]), 3),
+                    "preliminary_score": round(
+                        float(candidate.get("preliminary_score", 0.0)), 3
+                    ),
+                    "semantic_score": round(
+                        float(candidate.get("semantic_score", 0.0)), 3
+                    ),
                     "reason": reason,
                     "warnings": candidate["warnings"],
+                    "content_gate": candidate.get("content_gate", {}),
                 }
             )
             continue
 
         selected.append(candidate)
-        if len(selected) >= MAX_FINAL_COUNT:
-            break
 
     return selected, rejected
 
@@ -906,6 +1098,7 @@ def history_entry(candidate: dict[str, Any]) -> dict[str, Any]:
         "preliminary_score": round(float(candidate.get("preliminary_score", 0.0)), 3),
         "category": candidate.get("category", ""),
         "category_strength": round(float(candidate.get("category_strength", 0.0)), 3),
+        "content_gate_reason": candidate.get("content_gate_reason", ""),
         "trim_start": candidate.get("trim_start", 0.0),
         "trim_end": candidate.get("trim_end", candidate["info"]["duration"]),
         "audio_energy": round(float(candidate["audio"].get("energy", 0.0)), 4),
@@ -915,7 +1108,7 @@ def history_entry(candidate: dict[str, Any]) -> dict[str, Any]:
         "face_presence": round(float(candidate["face"].get("presence", 0.0)), 4),
         "frame_hashes": candidate.get("frame_hashes", []),
         "transcript_excerpt": transcript[:900],
-        "fingerprint_version": 3,
+        "fingerprint_version": 4,
     }
 
 
@@ -930,11 +1123,13 @@ def metadata_for_output(candidate: dict[str, Any], output_number: int) -> dict[s
             "score_breakdown": candidate["score_breakdown"],
             "hook_category": candidate.get("category", ""),
             "hook_confidence": min(
-                1.0, float(candidate.get("category_strength", 0.0)) / 5.0
+                1.0, float(candidate.get("transcript_category_strength", 0.0)) / 7.0
             ),
+            "content_gate": candidate.get("content_gate", {}),
+            "content_gate_reason": candidate.get("content_gate_reason", ""),
             "trim_start": candidate["trim_start"],
             "trim_end": candidate["trim_end"],
-            "selected_by": "viral_quality_gate_v3",
+            "selected_by": "viral_quality_gate_v4_precision_first",
         }
     )
     return metadata
@@ -959,7 +1154,7 @@ def candidate_index(path: Path) -> int | None:
 
 def main() -> None:
     print("=" * 64)
-    print(f"CLIPCRIP VIRAL QUALITY GATE V3 | {STREAMER_NAME}")
+    print(f"CLIPCRIP VIRAL QUALITY GATE V4 | {STREAMER_NAME}")
     print("Variable Ausgabe: 0 bis 3; kein erzwungener Füll-Clip")
     print("=" * 64)
 
@@ -1041,6 +1236,8 @@ def main() -> None:
                 "trim_start": metadata["trim_start"],
                 "trim_end": metadata["trim_end"],
                 "warnings": candidate["warnings"],
+                "content_gate_reason": metadata["content_gate_reason"],
+                "content_gate": metadata["content_gate"],
             }
         )
         print(

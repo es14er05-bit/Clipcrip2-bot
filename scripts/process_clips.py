@@ -35,7 +35,7 @@ STREAMER_NAME = "Jussef"
 TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
 HOOK_DURATION = 3.6
-HOOK_MIN_CONFIDENCE = 0.55
+HOOK_MIN_CONFIDENCE = 0.72
 
 BASE_PROMPT = (
     "Deutscher Twitch-Stream von Jussef. Die Sprecher reden schnell, locker "
@@ -57,9 +57,8 @@ HOOK_TEMPLATES: dict[str, list[str]] = {
         "Bro hat komplett genug",
     ],
     "surprise": [
-        "{name} checkt gar nichts",
         "{name} ist sprachlos",
-        "Bro glaubt es nicht",
+        "{name} glaubt es nicht",
     ],
     "fail": [
         "{name} ist cooked",
