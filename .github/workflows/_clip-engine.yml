@@ -72,6 +72,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-liberation
+
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
@@ -87,13 +88,13 @@ jobs:
       - name: Kandidaten herunterladen
         run: python "${{ inputs.download_script }}"
 
-      - name: Viral Quality Gate
+      - name: Beste verfügbaren Clips auswählen
         run: python "${{ inputs.quality_script }}"
 
-      - name: Retention-optimierte Videos rendern
+      - name: Videos mit Untertiteln rendern
         run: python "${{ inputs.process_script }}"
 
-      - name: Variable Ausgabe validieren
+      - name: Tagesausgabe validieren
         env:
           ENGINE_OUTPUT_DIR: ${{ inputs.output_dir }}
         run: |
@@ -103,30 +104,86 @@ jobs:
           from pathlib import Path
 
           output_dir = Path(os.environ["ENGINE_OUTPUT_DIR"])
-          videos = sorted(output_dir.glob("*.mp4"))
-          manifest_path = output_dir / "publish_manifest.json"
+
+          videos = sorted(
+              output_dir.glob("*.mp4")
+          )
+
+          manifest_path = (
+              output_dir
+              / "publish_manifest.json"
+          )
 
           if not manifest_path.exists():
-              raise SystemExit("publish_manifest.json fehlt.")
+              raise SystemExit(
+                  "publish_manifest.json fehlt."
+              )
 
-          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-          expected = int(manifest.get("output_count", -1))
+          manifest = json.loads(
+              manifest_path.read_text(
+                  encoding="utf-8"
+              )
+          )
 
-          print(f"Finale Videos: {len(videos)}")
-          print(f"Manifest-Status: {manifest.get('status')}")
+          expected = int(
+              manifest.get(
+                  "output_count",
+                  -1
+              )
+          )
 
-          if not 0 <= len(videos) <= 5:
-              raise SystemExit(f"Erwartet 0 bis 5 Videos, gefunden: {len(videos)}")
+          print(
+              f"Finale Videos: {len(videos)}"
+          )
+
+          print(
+              f"Manifest-Status: "
+              f"{manifest.get('status')}"
+          )
+
+          # WICHTIG:
+          # 0, 1 oder 2 sind ab jetzt
+          # KEIN erfolgreicher Tagesrun.
+          if not 3 <= len(videos) <= 5:
+              raise SystemExit(
+                  "Tagesziel verfehlt: "
+                  f"Erwartet 3 bis 5 Videos, "
+                  f"gefunden: {len(videos)}"
+              )
 
           if expected != len(videos):
               raise SystemExit(
-                  f"Manifest erwartet {expected}, im Ordner liegen {len(videos)} Videos."
+                  f"Manifest erwartet {expected}, "
+                  f"im Ordner liegen "
+                  f"{len(videos)} Videos."
+              )
+
+          if (
+              manifest.get("status")
+              != "ready"
+          ):
+              raise SystemExit(
+                  "Manifest ist nicht READY."
               )
 
           for video in videos:
-              if video.stat().st_size < 100_000:
-                  raise SystemExit(f"Output zu klein: {video}")
-              print(f"OK: {video.name} | {video.stat().st_size / 1024 / 1024:.1f} MB")
+              if (
+                  video.stat().st_size
+                  < 100_000
+              ):
+                  raise SystemExit(
+                      f"Output zu klein: {video}"
+                  )
+
+              print(
+                  f"OK: {video.name} | "
+                  f"{video.stat().st_size / 1024 / 1024:.1f} MB"
+              )
+
+          print(
+              "TAGESZIEL ERREICHT: "
+              f"{len(videos)} Videos."
+          )
           PY
 
       - name: Ergebnis als GitHub Artifact speichern
@@ -137,7 +194,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Starke Videos zu Google Drive hochladen
+      - name: Videos zu Google Drive hochladen
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -154,6 +211,7 @@ jobs:
         run: |
           git config user.name "$BOT_NAME"
           git config user.email "clipcrip-engine@users.noreply.github.com"
+
           git add "$USED_FILE" "$HISTORY_FILE"
 
           if git diff --cached --quiet; then
@@ -165,9 +223,11 @@ jobs:
 
           for attempt in 1 2 3 4 5; do
             git pull --rebase origin main
+
             if git push origin HEAD:main; then
               exit 0
             fi
+
             echo "Push-Konflikt, Versuch $attempt/5 wird wiederholt."
           done
 
