@@ -46,6 +46,7 @@ except ImportError:
     sys.modules["cv2"] = types.ModuleType("cv2")
 
 from scripts import get_clips
+from scripts import drive_upload
 from scripts import process_clips
 from scripts import quality_control
 
@@ -279,6 +280,20 @@ class ContentGateTests(unittest.TestCase):
         self.assertTrue(proven["content_gate_passed"])
         self.assertEqual(proven["content_gate_reason"], "audience_proven")
 
+    def test_rejects_repetitive_whisper_noise_despite_audience_signal(self):
+        noisy = self.analyze(
+            self.candidate(
+                "Sie will was von Jussef",
+                ("Rum dumm " * 35) + "vielen Dank",
+                views=3000,
+                view_points=24.0,
+                velocity_points=18.0,
+                duration=26.0,
+            )
+        )
+        self.assertFalse(noisy["content_gate_passed"])
+        self.assertIn("repetitiv", noisy["content_gate_reason"])
+
 
 class RendererTests(unittest.TestCase):
     def test_hook_is_optional_and_contains_no_emoji(self):
@@ -315,6 +330,17 @@ class RendererTests(unittest.TestCase):
             )
             self.assertEqual(manifest["status"], "no_strong_clips")
             self.assertEqual(manifest["output_count"], 0)
+
+
+class DriveSyncTests(unittest.TestCase):
+    def test_only_old_videos_are_marked_stale(self):
+        folder_files = [
+            {"id": "new", "name": "20260828_01_jussef.mp4", "mimeType": "video/mp4"},
+            {"id": "old", "name": "01_jussef_tiktok.mp4", "mimeType": "video/mp4"},
+            {"id": "report", "name": "notes.txt", "mimeType": "text/plain"},
+        ]
+        stale = drive_upload.stale_video_files(folder_files, {"new"})
+        self.assertEqual([item["id"] for item in stale], ["old"])
 
 
 if __name__ == "__main__":

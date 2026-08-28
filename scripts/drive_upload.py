@@ -1,4 +1,10 @@
-"""Upload a variable number of rendered clips to Google Drive safely."""
+"""Synchronize the current rendered batch to its dedicated Drive folder.
+
+The folder is a current-batch inbox, not an archive. New videos are uploaded
+and verified first. Only then are older video files moved to Drive's trash, so
+the folder never mixes clips from multiple runs and failures keep the previous
+batch recoverable.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +22,7 @@ from urllib3.util.retry import Retry
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 DRIVE_API = "https://www.googleapis.com/drive/v3"
 DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3/files"
-MAX_EXPECTED_FILES = 3
+MAX_EXPECTED_FILES = 5
 
 
 def build_session() -> requests.Session:
@@ -27,7 +33,7 @@ def build_session() -> requests.Session:
         status=6,
         backoff_factor=1.5,
         status_forcelist=(408, 429, 500, 502, 503, 504),
-        allowed_methods=("GET", "POST", "DELETE"),
+        allowed_methods=("GET", "POST", "PATCH"),
         raise_on_status=False,
     )
     session = requests.Session()
@@ -68,21 +74,47 @@ def escape_query(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def find_existing(
-    session: requests.Session, token: str, folder_id: str, filename: str
+def list_folder_files(
+    session: requests.Session, token: str, folder_id: str
 ) -> list[dict]:
-    query = (
-        f"name='{escape_query(filename)}' and '{folder_id}' in parents "
-        "and trashed=false"
-    )
-    response = session.get(
-        f"{DRIVE_API}/files",
-        headers=auth_headers(token),
-        params={"q": query, "fields": "files(id,name,size)", "spaces": "drive"},
-        timeout=60,
-    )
-    response.raise_for_status()
-    return response.json().get("files", [])
+    query = f"'{escape_query(folder_id)}' in parents and trashed=false"
+    page_token = ""
+    files: list[dict] = []
+    while True:
+        params = {
+            "q": query,
+            "fields": "nextPageToken,files(id,name,size,mimeType)",
+            "spaces": "drive",
+            "pageSize": 1000,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        response = session.get(
+            f"{DRIVE_API}/files",
+            headers=auth_headers(token),
+            params=params,
+            timeout=60,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        files.extend(item for item in payload.get("files", []) if isinstance(item, dict))
+        page_token = str(payload.get("nextPageToken", "")).strip()
+        if not page_token:
+            return files
+
+
+def is_video_file(item: dict) -> bool:
+    name = str(item.get("name", "")).lower()
+    mime_type = str(item.get("mimeType", "")).lower()
+    return name.endswith(".mp4") or mime_type.startswith("video/")
+
+
+def stale_video_files(folder_files: list[dict], current_ids: set[str]) -> list[dict]:
+    return [
+        item
+        for item in folder_files
+        if is_video_file(item) and str(item.get("id", "")) not in current_ids
+    ]
 
 
 def upload_video(
@@ -109,14 +141,26 @@ def upload_video(
     return response.json()
 
 
-def delete_file(session: requests.Session, token: str, file_id: str) -> None:
-    response = session.delete(
+def verify_upload(session: requests.Session, token: str, file_id: str) -> dict:
+    response = session.get(
         f"{DRIVE_API}/files/{file_id}",
         headers=auth_headers(token),
+        params={"fields": "id,name,size,parents,trashed"},
         timeout=60,
     )
-    if response.status_code not in (200, 204):
-        response.raise_for_status()
+    response.raise_for_status()
+    return response.json()
+
+
+def trash_file(session: requests.Session, token: str, file_id: str) -> None:
+    response = session.patch(
+        f"{DRIVE_API}/files/{file_id}",
+        headers={**auth_headers(token), "Content-Type": "application/json"},
+        params={"fields": "id,trashed"},
+        json={"trashed": True},
+        timeout=60,
+    )
+    response.raise_for_status()
 
 
 def main() -> None:
@@ -127,9 +171,6 @@ def main() -> None:
 
     files = sorted(output_dir.glob("*.mp4"))
     print(f"{len(files)} fertige Videos in {output_dir} gefunden.")
-    if not files:
-        print("Kein starker Clip vorhanden. Drive-Upload wird sauber übersprungen.")
-        return
     if len(files) > MAX_EXPECTED_FILES:
         raise RuntimeError(
             f"Sicherheitsstopp: maximal {MAX_EXPECTED_FILES} Outputs erwartet, "
@@ -137,31 +178,49 @@ def main() -> None:
         )
 
     session = build_session()
+    uploaded_ids: set[str] = set()
     try:
         token = get_access_token(session)
-        for index, path in enumerate(files, start=1):
-            print(f"DRIVE {index}/{len(files)} | {path.name}")
-            existing = find_existing(session, token, folder_id, path.name)
-            uploaded = upload_video(session, token, folder_id, path)
-            new_id = str(uploaded.get("id", "")).strip()
-            if not new_id:
-                raise RuntimeError(f"Drive lieferte keine Datei-ID für {path.name}.")
+        try:
+            for index, path in enumerate(files, start=1):
+                print(f"DRIVE {index}/{len(files)} | {path.name}")
+                uploaded = upload_video(session, token, folder_id, path)
+                new_id = str(uploaded.get("id", "")).strip()
+                if not new_id:
+                    raise RuntimeError(f"Drive lieferte keine Datei-ID für {path.name}.")
+                uploaded_ids.add(new_id)
 
-            verification = find_existing(session, token, folder_id, path.name)
-            if not any(str(item.get("id", "")) == new_id for item in verification):
-                raise RuntimeError(f"Drive-Verifikation fehlgeschlagen: {path.name}")
+                verification = verify_upload(session, token, new_id)
+                if (
+                    str(verification.get("id", "")) != new_id
+                    or bool(verification.get("trashed", False))
+                    or folder_id not in verification.get("parents", [])
+                ):
+                    raise RuntimeError(f"Drive-Verifikation fehlgeschlagen: {path.name}")
+                print(f"UPLOAD OK | {path.name} | {new_id}")
+                if index < len(files):
+                    time.sleep(1.0)
+        except Exception:
+            print("Upload fehlgeschlagen; neue Teil-Uploads werden zurückgerollt.")
+            for new_id in uploaded_ids:
+                try:
+                    trash_file(session, token, new_id)
+                except Exception as rollback_error:
+                    print(f"WARNUNG: Rollback für {new_id} fehlgeschlagen: {rollback_error}")
+            raise
 
-            for old in existing:
-                old_id = str(old.get("id", "")).strip()
-                if old_id and old_id != new_id:
-                    delete_file(session, token, old_id)
-            print(f"UPLOAD OK | {path.name} | {new_id}")
-            if index < len(files):
-                time.sleep(1.0)
+        folder_files = list_folder_files(session, token, folder_id)
+        stale = stale_video_files(folder_files, uploaded_ids)
+        print(f"Alte Videos aus früheren Runs: {len(stale)}")
+        for old in stale:
+            old_id = str(old.get("id", "")).strip()
+            if old_id:
+                trash_file(session, token, old_id)
+                print(f"IN PAPIERKORB | {old.get('name', old_id)}")
     finally:
         session.close()
 
-    print(f"Drive-Upload abgeschlossen: {len(files)} Videos.")
+    print(f"Drive-Sync abgeschlossen: aktueller Batch enthält {len(files)} Videos.")
 
 
 if __name__ == "__main__":
