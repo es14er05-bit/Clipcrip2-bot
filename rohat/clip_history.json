@@ -83188,5 +83188,69 @@
         ]
       }
     ]
+  },
+  "CleanAdventurousHorseradishKappaClaus-aF6aCU3snzc03b7m": {
+    "clip_id": "CleanAdventurousHorseradishKappaClaus-aF6aCU3snzc03b7m",
+    "title": "ich hab nicht so eine schiefe hairline",
+    "created_at": "2026-08-13T17:29:56Z",
+    "duration": 30.0,
+    "video_id": "2845166545",
+    "vod_offset": 5003,
+    "viral_score": 78.518,
+    "preliminary_score": 57.576,
+    "category": "",
+    "category_strength": 0.0,
+    "content_gate_reason": "audience_proven",
+    "trim_start": 0.0,
+    "trim_end": 22.0,
+    "audio_energy": 0.3002,
+    "audio_dynamics": 0.8128,
+    "audio_activity": 0.5667,
+    "motion_peak": 38.8259,
+    "face_presence": 0.9333,
+    "frame_hashes": [
+      "7575656965646031",
+      "9fb7f555d5d4d692",
+      "9fb7f555d5d4d692",
+      "9f1f595959609492",
+      "9fd9d9d9d9c09492",
+      "9f9999d9d9c09492",
+      "9f9999d9d9c09492",
+      "9fd9d9d9d9c09092"
+    ],
+    "transcript_excerpt": "Leute, für den guten Zweck, alles gut. Ich schwöre für den guten Zweck. Ja, das war's. Einmal das Bild, was du gemalt hast, auch löschen. Entschuldigung! Ey, das ist eine Zeichnung von mir! Warum soll ich das lösen? Ich habe nicht so eine schiefe Hairline. Erstens. Zweitens, das ist respektlos. meine zeichnung ist voll gut mann was man nicht alles für die",
+    "fingerprint_version": 4
+  },
+  "SavageBeautifulLionOpieOP-Qqd8P2v5ZgN-Fp9a": {
+    "clip_id": "SavageBeautifulLionOpieOP-Qqd8P2v5ZgN-Fp9a",
+    "title": "N Bombe Offstream",
+    "created_at": "2026-08-11T17:46:20Z",
+    "duration": 33.2,
+    "video_id": "2843388898",
+    "vod_offset": 2572,
+    "viral_score": 69.438,
+    "preliminary_score": 56.473,
+    "category": "",
+    "category_strength": 0.0,
+    "content_gate_reason": "audience_proven",
+    "trim_start": 11.217,
+    "trim_end": 33.217,
+    "audio_energy": 0.6327,
+    "audio_dynamics": 0.9714,
+    "audio_activity": 0.7424,
+    "motion_peak": 14.4801,
+    "face_presence": 0.8667,
+    "frame_hashes": [
+      "183a3a2a3a72d393",
+      "183a3a392b73d38b",
+      "183a3a3a3a73c381",
+      "183a3a3a3a73d383",
+      "183a3a3a226bcbdb",
+      "183a3a2a3a73d391",
+      "183a3a283363c381",
+      "183a3a2a3363c3c1"
+    ],
+    "transcript_excerpt": "Ich glaub die M-Bombe immer, ne? Wo ist er? Was? Sag mal. Nein! Sag mal. Nein, ich sag das nicht. Ich geb dir Pass, sag. Gibst du mir Pass? Ich geb dir Pass, sag einfach kurz. Ja, also, ne, also Onstream geht nicht. Nee, ja, ja, fang das an. Das ist aber die richtige Antwort. Er sagt Onstream geht nicht. Er wird Onstream sagen. Ja, ja, Hugo, wer wüs. Wir rufen dich nach dem Stream nochmal an. Ja, Hugo. Ich bin der Mann, mein Bester.",
+    "fingerprint_version": 4
   }
 }
