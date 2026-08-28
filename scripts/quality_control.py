@@ -40,7 +40,7 @@ WHISPER_PROMPT = (
     "behalte Jugendsprache bei."
 )
 
-MAX_FINAL_COUNT = 3
+MAX_FINAL_COUNT = 5
 SEMANTIC_POOL_SIZE = 14
 MIN_VIRAL_SCORE = 68.0
 MAX_OUTPUT_DURATION = 30.0
@@ -778,6 +778,11 @@ def evaluate_content_gate(candidate: dict[str, Any]) -> tuple[bool, str, dict[st
 
     text = str(candidate.get("transcript_text", ""))
     words = normalize_text(text).split()
+    content_word_list = [
+        word for word in words if len(word) >= 3 and word not in STOPWORDS
+    ]
+    unique_content_words = set(content_word_list)
+    content_diversity = len(unique_content_words) / max(len(content_word_list), 1)
     metadata = candidate["metadata"]
     duration = float(candidate["info"]["duration"])
     category = str(candidate.get("category", ""))
@@ -794,11 +799,15 @@ def evaluate_content_gate(candidate: dict[str, Any]) -> tuple[bool, str, dict[st
     reaction_route = transcript_strength >= 4.5 or (
         transcript_strength >= 3.5 and title_strength >= 2.0
     )
+    audience_transcript_ok = (
+        len(unique_content_words) >= 7 and content_diversity >= 0.22
+    )
     audience_route = (
         audience >= 0.68
         and views >= 500
         and meaningful_title(metadata.get("title", ""))
         and duration <= 40.0
+        and audience_transcript_ok
     )
 
     details = {
@@ -811,12 +820,16 @@ def evaluate_content_gate(candidate: dict[str, Any]) -> tuple[bool, str, dict[st
         "event_time": None if event_time is None else round(event_time, 3),
         "promo_strength": round(promo_strength, 3),
         "word_count": len(words),
+        "unique_content_words": len(unique_content_words),
+        "content_diversity": round(content_diversity, 3),
     }
 
     if len(words) < 10 or float(candidate.get("speech_ratio", 0.0)) < 0.18:
         return False, "zu wenig verständlicher Inhalt", details
     if promo_strength >= 3.5 and transcript_strength < 6.5:
         return False, "hauptsächlich Follow-, Upload- oder Stream-Logistik", details
+    if not reaction_route and not audience_transcript_ok:
+        return False, "zu repetitives oder unverständliches Transkript", details
     if not reaction_route and not audience_route:
         return False, "kein klarer starker Moment oder belastbares Zuschauer-Signal", details
     if reaction_route and event_time is not None and event_time > duration - 1.8:
@@ -1058,7 +1071,7 @@ def select_candidates(
                         reason = f"History-Duplikat {old_id}: {duplicate}"
                         break
             if not reason and len(selected) >= MAX_FINAL_COUNT:
-                reason = "qualifiziert, aber außerhalb der stärksten Top 3"
+                reason = "qualifiziert, aber außerhalb der stärksten Top 5"
 
         if reason:
             rejected.append(
@@ -1155,7 +1168,7 @@ def candidate_index(path: Path) -> int | None:
 def main() -> None:
     print("=" * 64)
     print(f"CLIPCRIP VIRAL QUALITY GATE V4 | {STREAMER_NAME}")
-    print("Variable Ausgabe: 0 bis 3; kein erzwungener Füll-Clip")
+    print("Variable Ausgabe: 0 bis 5; kein erzwungener Füll-Clip")
     print("=" * 64)
 
     clean_directory(FINAL_DIR)

@@ -41,7 +41,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: clipcrip-shared-engine-${{ github.repository }}
+  group: clipcrip-${{ inputs.bot_name }}
   cancel-in-progress: false
 
 jobs:
@@ -115,8 +115,8 @@ jobs:
           print(f"Finale Videos: {len(videos)}")
           print(f"Manifest-Status: {manifest.get('status')}")
 
-          if not 0 <= len(videos) <= 3:
-              raise SystemExit(f"Erwartet 0 bis 3 Videos, gefunden: {len(videos)}")
+          if not 0 <= len(videos) <= 5:
+              raise SystemExit(f"Erwartet 0 bis 5 Videos, gefunden: {len(videos)}")
 
           if expected != len(videos):
               raise SystemExit(
@@ -162,5 +162,14 @@ jobs:
           fi
 
           git commit -m "Update $BOT_NAME clip history"
-          git pull --rebase origin main
-          git push origin HEAD:main
+
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push-Konflikt, Versuch $attempt/5 wird wiederholt."
+          done
+
+          echo "History konnte nach 5 Versuchen nicht gespeichert werden."
+          exit 1

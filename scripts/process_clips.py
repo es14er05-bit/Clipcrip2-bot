@@ -26,7 +26,7 @@ OUTPUT_DIR = REPO_ROOT / "tiktok_ready"
 METADATA_FILE = REPO_ROOT / "clips_today.json"
 SELECTION_REPORT_FILE = REPO_ROOT / "selection_report.json"
 
-MAX_VIDEOS = 3
+MAX_VIDEOS = 5
 WHISPER_MODEL = "turbo"
 OUTPUT_PREFIX = "jussef_tiktok"
 WATERMARK = "@clipcrip2"
