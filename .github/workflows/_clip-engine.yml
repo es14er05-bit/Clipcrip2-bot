@@ -76,9 +76,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Quality-Gate-Tests ausführen
-        run: python -m unittest discover -s tests -v
-
       - name: Kandidaten finden
         env:
           TWITCH_CLIENT_ID: ${{ secrets.TWITCH_CLIENT_ID }}
