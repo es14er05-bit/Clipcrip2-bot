@@ -72,7 +72,7 @@ def main():
     print("==========================================")
 
     print(
-        "QC-Engine: gemeinsame Viral Quality Gate V3"
+        "QC-Engine: gemeinsame Viral Quality Gate V4"
     )
 
     print(

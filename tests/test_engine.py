@@ -153,6 +153,133 @@ class DuplicateTests(unittest.TestCase):
         )
 
 
+class ContentGateTests(unittest.TestCase):
+    @staticmethod
+    def candidate(
+        title,
+        transcript,
+        *,
+        views=200,
+        view_points=14.0,
+        velocity_points=5.0,
+        duration=30.0,
+    ):
+        return {
+            "path": "clip.mp4",
+            "metadata": {
+                "id": title,
+                "title": title,
+                "view_count": views,
+                "metadata_score": 42.0,
+                "metadata_score_breakdown": {
+                    "views": view_points,
+                    "view_velocity": velocity_points,
+                },
+                "video_id": "",
+                "vod_offset": None,
+            },
+            "info": {"duration": duration},
+            "audio": {"peakiness": 1.0, "peak_time": duration / 2},
+            "motion": {"peak": 12.0},
+            "face": {"presence": 0.8},
+            "frame_hashes": [],
+            "legacy_signature": [],
+            "warnings": [],
+            "hard_reject": False,
+            "preliminary_score": 80.0,
+            "transcript": {
+                "text": transcript,
+                "segments": [
+                    {
+                        "start": 0.1,
+                        "end": max(1.0, duration - 1.0),
+                        "text": transcript,
+                        "words": [],
+                    }
+                ],
+            },
+        }
+
+    def analyze(self, candidate):
+        semantic_score, breakdown = quality_control.semantic_analysis(candidate)
+        candidate["semantic_score"] = semantic_score
+        candidate["score_breakdown"] = breakdown
+        candidate["viral_score"] = candidate["preliminary_score"] + semantic_score
+        return candidate
+
+    def test_rejects_the_three_bad_run_65_content_patterns(self):
+        confusing = self.analyze(
+            self.candidate(
+                "Was passiert hier",
+                "Welche Kinderfilme denn? Warte mal, deine Fresse. Oh mein Gott. "
+                "Ist sie Roma? Was passiert hier? Was bist du denn?",
+                views=412,
+                view_points=15.7,
+                velocity_points=5.8,
+            )
+        )
+        upload_talk = self.analyze(
+            self.candidate(
+                "jussef platzt auf rohat",
+                "Morgen neuer Upload. Wir machen eine Challenge und gehen rein. "
+                "Hab ich gerade irgendwas kaputt gemacht? Nein, wir reden weiter.",
+                views=217,
+                view_points=14.0,
+                velocity_points=4.8,
+                duration=38.0,
+            )
+        )
+        follow_request = self.analyze(
+            self.candidate(
+                "abu hamza grüßt jussef",
+                "Alle einmal einfolgen. Hier ein Grußvideo. Wir machen die Spenden "
+                "aus, damit er seine Miete zahlen kann. Wallah, wir warten hier.",
+                views=102,
+                view_points=12.1,
+                velocity_points=3.5,
+            )
+        )
+
+        self.assertFalse(confusing["content_gate_passed"])
+        self.assertIn("kein klarer", confusing["content_gate_reason"])
+        self.assertFalse(upload_talk["content_gate_passed"])
+        self.assertIn("Upload", upload_talk["content_gate_reason"])
+        self.assertFalse(follow_request["content_gate_passed"])
+        self.assertIn("Follow", follow_request["content_gate_reason"])
+
+        selected, rejected = quality_control.select_candidates(
+            [confusing, upload_talk, follow_request], {}, True
+        )
+        self.assertEqual(selected, [])
+        self.assertEqual(len(rejected), 3)
+
+    def test_accepts_repeated_evidence_of_a_real_reaction(self):
+        strong = self.analyze(
+            self.candidate(
+                "Jussef kann nicht mehr vor Lachen",
+                "Warte, was macht er da? Hahaha, ich kann nicht mehr. Haha, "
+                "der Chat lacht komplett und Jussef kann nicht mehr.",
+            )
+        )
+        self.assertTrue(strong["content_gate_passed"])
+        self.assertEqual(strong["content_gate_reason"], "reaction")
+
+    def test_accepts_exceptional_twitch_audience_evidence_without_keyword(self):
+        proven = self.analyze(
+            self.candidate(
+                "Sie will was von Jussef",
+                "Sie schaut ihn an und fragt ihn direkt nach seiner Nummer. Er "
+                "versteht die Frage erst nicht und die anderen erklären es ihm.",
+                views=2126,
+                view_points=20.0,
+                velocity_points=10.0,
+                duration=26.0,
+            )
+        )
+        self.assertTrue(proven["content_gate_passed"])
+        self.assertEqual(proven["content_gate_reason"], "audience_proven")
+
+
 class RendererTests(unittest.TestCase):
     def test_hook_is_optional_and_contains_no_emoji(self):
         self.assertEqual(process_clips.create_hook({}), "")
