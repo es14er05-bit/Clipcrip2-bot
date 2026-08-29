@@ -1,0 +1,36 @@
+name: ClipCrip6 Coachlim Bot
+
+'on':
+  workflow_dispatch:
+
+  schedule:
+    - cron: "8 7 * * *"
+
+jobs:
+  coachlim:
+    uses: ./.github/workflows/_clip-engine.yml
+
+    with:
+      streamer_label: Coachlim
+
+      discovery_script: coachlim/scripts/get_clips.py
+
+      download_script: coachlim/scripts/download_clips.py
+
+      quality_script: coachlim/scripts/quality_control.py
+
+      process_script: coachlim/scripts/process_clips.py
+
+      output_dir: coachlim/tiktok_ready
+
+      used_file: coachlim/used_clips.json
+
+      history_file: coachlim/clip_history.json
+
+      drive_folder_id: 1gD7u4qBqouWydkuwKVJ-7Pc5x3ennGNf
+
+      artifact_name: Coachlim-ClipCrip6-Quality-Clips
+
+      bot_name: clipcrip6-bot
+
+    secrets: inherit
