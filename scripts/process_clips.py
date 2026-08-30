@@ -502,27 +502,11 @@ def create_karaoke_text(
     )
 
 
-def build_hook(transcript: dict[str, Any], streamer_name: str) -> str:
-    """Create a short, natural German hook from the actual clip transcript."""
-    text = clean_text(transcript.get("text", "")).lower()
-
-    if any(term in text for term in ("haha", "hahaha", "lacht", "lachen")):
-        return f"{streamer_name} kann nicht mehr"
-    if any(term in text for term in ("wtf", "oh mein gott", "niemals", "oha")):
-        return f"{streamer_name} checkt gar nix"
-    if any(term in text for term in ("verkackt", "fail", "reingeschissen", "crashout", "ausrast")):
-        return f"{streamer_name} ist komplett raus"
-    if any(term in text for term in ("digga", "bro", "junge", "bruder")):
-        return "bro was passiert hier"
-    return "das kam komplett aus dem nix"
-
-
 def create_ass(
     transcript: dict[str, Any],
     ass_file: Path,
     trim_start: float,
     trim_end: float,
-    hook_text: str = "",
 ) -> int:
 
     lines = [
@@ -545,11 +529,6 @@ def create_ass(
             "Style: TikTok,DejaVu Sans,70,"
             "&H00FFFFFF,&H0000FFFF,&H00000000,&H70000000,"
             "-1,0,0,0,100,100,1,0,1,5,1,2,70,70,390,1"
-        ),
-        (
-            "Style: Hook,DejaVu Sans,66,"
-            "&H00FFFFFF,&H00FFFFFF,&H00000000,&H001515D9,"
-            "-1,0,0,0,100,100,1,0,3,2,0,8,70,70,255,1"
         ),
         "",
         "[Events]",
@@ -587,12 +566,6 @@ def create_ass(
             f"{ass_time(end)},"
             "TikTok,,0,0,0,,"
             f"{create_karaoke_text(chunk)}"
-        )
-
-    if hook_text:
-        lines.append(
-            "Dialogue: 2,0:00:00.00,0:00:02.35,Hook,,0,0,0,,"
-            + escape_ass_text(hook_text)
         )
 
     with ass_file.open(
@@ -921,17 +894,11 @@ def process_video(
         / f"caption_{video_number(source)}.ass"
     )
 
-    hook_text = build_hook(
-        transcript,
-        STREAMER_NAME,
-    )
-
     caption_count = create_ass(
         transcript,
         ass_file,
         trim_start,
         trim_end,
-        hook_text,
     )
 
     if caption_count <= 0:
@@ -1015,8 +982,8 @@ def process_video(
             "",
         ),
         "subtitles": True,
-        "hook": hook_text,
-        "hook_duration_seconds": 2.35,
+        "hook": "",
+        "hook_duration_seconds": 0.0,
         "caption_blocks": caption_count,
         "trim_start": trim_start,
         "trim_end": trim_end,
@@ -1218,8 +1185,8 @@ def main() -> None:
         ),
         "minimum_required": MIN_VIDEOS,
         "target": MAX_VIDEOS,
-        "hooks": True,
-        "hook_style": "short-natural-red-box-v2",
+        "hooks": False,
+        "hook_style": "disabled-manual-hooks",
         "subtitles": True,
         "videos": outputs,
     }
@@ -1238,7 +1205,7 @@ def main() -> None:
     print(
         f"RENDERER FERTIG | "
         f"{len(outputs)} Videos | "
-        "HOOKS V2 AN"
+        "KEINE AUTO-HOOKS"
     )
     print(
         "=" * 64
