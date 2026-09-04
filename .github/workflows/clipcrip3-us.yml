@@ -1,0 +1,42 @@
+name: ClipCrip3 US Bot
+
+'on':
+  workflow_dispatch:
+
+  schedule:
+    # 09:12 UTC = aktuell 11:12 Uhr deutscher Sommerzeit.
+    # Dadurch erwischen wir viele Clips aus dem US-Abend / der US-Nacht.
+    - cron: "12 9 * * *"
+
+jobs:
+  us:
+    uses: ./.github/workflows/_clip-engine.yml
+
+    with:
+      streamer_label: "US Pool - Kai / Speed / N3on"
+
+      discovery_script: us/scripts/get_clips.py
+
+      download_script: us/scripts/download_clips.py
+
+      quality_script: us/scripts/quality_control.py
+
+      process_script: us/scripts/process_clips.py
+
+      output_dir: us/tiktok_ready
+
+      used_file: us/used_clips.json
+
+      history_file: us/clip_history.json
+
+      drive_folder_id: HIER_DEINE_DRIVE_FOLDER_ID
+
+      artifact_name: ClipCrip3-US-Quality-Clips
+
+      bot_name: clipcrip3-us-bot
+
+      min_output: 1
+
+      max_output: 2
+
+    secrets: inherit
