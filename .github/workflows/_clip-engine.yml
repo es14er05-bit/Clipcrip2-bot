@@ -36,6 +36,14 @@ name: Shared ClipCrip Engine
       bot_name:
         required: true
         type: string
+      min_output:
+        required: false
+        type: number
+        default: 3
+      max_output:
+        required: false
+        type: number
+        default: 5
 
 permissions:
   contents: write
@@ -94,6 +102,8 @@ jobs:
       - name: Tagesausgabe validieren
         env:
           ENGINE_OUTPUT_DIR: ${{ inputs.output_dir }}
+          ENGINE_MIN_OUTPUT: ${{ inputs.min_output }}
+          ENGINE_MAX_OUTPUT: ${{ inputs.max_output }}
         run: |
           python - <<'PY'
           import json
@@ -138,13 +148,18 @@ jobs:
               f"{manifest.get('status')}"
           )
 
-          # WICHTIG:
-          # 0, 1 oder 2 sind ab jetzt
-          # KEIN erfolgreicher Tagesrun.
-          if not 3 <= len(videos) <= 5:
+          min_output = int(
+              os.environ["ENGINE_MIN_OUTPUT"]
+          )
+
+          max_output = int(
+              os.environ["ENGINE_MAX_OUTPUT"]
+          )
+
+          if not min_output <= len(videos) <= max_output:
               raise SystemExit(
                   "Tagesziel verfehlt: "
-                  f"Erwartet 3 bis 5 Videos, "
+                  f"Erwartet {min_output} bis {max_output} Videos, "
                   f"gefunden: {len(videos)}"
               )
 
@@ -155,19 +170,13 @@ jobs:
                   f"{len(videos)} Videos."
               )
 
-          if (
-              manifest.get("status")
-              != "ready"
-          ):
+          if manifest.get("status") != "ready":
               raise SystemExit(
                   "Manifest ist nicht READY."
               )
 
           for video in videos:
-              if (
-                  video.stat().st_size
-                  < 100_000
-              ):
+              if video.stat().st_size < 100_000:
                   raise SystemExit(
                       f"Output zu klein: {video}"
                   )
@@ -179,7 +188,8 @@ jobs:
 
           print(
               "TAGESZIEL ERREICHT: "
-              f"{len(videos)} Videos."
+              f"{len(videos)} Videos "
+              f"(erlaubt: {min_output}-{max_output})."
           )
           PY
 
