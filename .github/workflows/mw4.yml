@@ -1,4 +1,4 @@
-name: MW4 - zwei Uploadpakete
+name: MW4 - zwei TikTok Videos
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
         description: "Optional: vorhandenen Tag erneut rendern (JJJJ-MM-TT)"
         required: false
         type: string
+
   schedule:
     - cron: "15 6 * * *"
 
@@ -20,14 +21,25 @@ concurrency:
 jobs:
   produce:
     if: github.event_name == 'workflow_dispatch' || vars.MW4_ENABLED == 'true'
+
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+
+    timeout-minutes: 60
 
     env:
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
       GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+
       MW4_DRIVE_FOLDER_ID: ${{ vars.MW4_DRIVE_FOLDER_ID }}
+
+      MW4_WHISPER_MODEL: "base.en"
+
+      MW4_TRANSLATION_MODEL: "Helsinki-NLP/opus-mt-en-de"
+
+      HF_HUB_DISABLE_TELEMETRY: "1"
+
+      TOKENIZERS_PARALLELISM: "false"
 
     steps:
       - name: Standardbranch laden
@@ -43,94 +55,194 @@ jobs:
           cache: pip
           cache-dependency-path: mw4/requirements.txt
 
+      - name: KI-Modellcache laden
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/whisper
+            ~/.cache/huggingface/hub
+
+          key: mw4-local-ai-${{ runner.os }}-base-en-opus-mt-en-de-v1
+
       - name: Abhängigkeiten installieren
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
-          python -m pip install -r mw4/requirements.txt
+
+          sudo apt-get install -y \
+            ffmpeg \
+            fonts-dejavu-core
+
+          python -m pip install --upgrade pip
+
+          python -m pip install \
+            -r mw4/requirements.txt
+
+      - name: Code prüfen
+        run: |
+          python -m py_compile mw4/bot.py
+
+          python -m py_compile mw4/subtitles.py
 
       - name: Tagesdatum festlegen
         id: day
         env:
           REQUESTED_DAY: ${{ inputs.batch_date }}
+
         run: |
           python - <<'PY'
           import os
-          from datetime import date, datetime
+
+          from datetime import date
+          from datetime import datetime
           from zoneinfo import ZoneInfo
 
-          value = os.environ.get("REQUESTED_DAY", "").strip()
-          value = value or datetime.now(
-              ZoneInfo("Europe/Berlin")
-          ).date().isoformat()
+          value = os.environ.get(
+              "REQUESTED_DAY",
+              "",
+          ).strip()
 
-          if date.fromisoformat(value).isoformat() != value:
-              raise SystemExit("Datum muss JJJJ-MM-TT sein")
+          if not value:
+              value = datetime.now(
+                  ZoneInfo(
+                      "Europe/Berlin"
+                  )
+              ).date().isoformat()
 
-          with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
-              stream.write(f"value={value}\n")
+          if (
+              date.fromisoformat(
+                  value
+              ).isoformat()
+              != value
+          ):
+              raise SystemExit(
+                  "Datum muss JJJJ-MM-TT sein"
+              )
+
+          with open(
+              os.environ[
+                  "GITHUB_OUTPUT"
+              ],
+              "a",
+          ) as stream:
+              stream.write(
+                  f"value={value}\n"
+              )
           PY
 
       - name: Genau zwei Quellen reservieren
         env:
           BATCH_DAY: ${{ steps.day.outputs.value }}
-        run: python mw4/bot.py prepare --day "$BATCH_DAY"
 
-      - name: Reservierung vor der Ausgabe dauerhaft sichern
+        run: |
+          python mw4/bot.py \
+            prepare \
+            --day "$BATCH_DAY"
+
+      - name: Reservierung dauerhaft sichern
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
         run: |
-          git config user.name "MW4 Bot"
-          git config user.email "mw4-bot@users.noreply.github.com"
+          git config \
+            user.name \
+            "MW4 Bot"
 
-          git add mw4/state/mw4.json
+          git config \
+            user.email \
+            "mw4-bot@users.noreply.github.com"
 
-          if ! git diff --cached --quiet; then
-            git commit -m "Reserve MW4 source batch"
+          git add \
+            mw4/state/mw4.json
 
-            for attempt in 1 2 3; do
-              git pull --rebase origin "$DEFAULT_BRANCH"
+          if ! git diff --cached --quiet
+          then
+            git commit \
+              -m "Reserve MW4 source batch"
 
-              if git push origin "HEAD:$DEFAULT_BRANCH"; then
+            for attempt in 1 2 3
+            do
+              git pull \
+                --rebase \
+                origin \
+                "$DEFAULT_BRANCH"
+
+              if git push \
+                origin \
+                "HEAD:$DEFAULT_BRANCH"
+              then
                 exit 0
               fi
+
+              sleep 3
             done
 
-            echo "Reservierung nicht gespeichert; keine Ausgabe freigegeben."
+            echo \
+              "Reservierung konnte nicht gespeichert werden."
+
             exit 1
           fi
 
-      - name: Zwei Videos und Captions rendern
+      - name: Zwei TikTok Videos rendern
         env:
           BATCH_DAY: ${{ steps.day.outputs.value }}
-        run: python mw4/bot.py render --day "$BATCH_DAY"
 
-      - name: Tagespaket sichern
+        run: |
+          python mw4/bot.py \
+            render \
+            --day "$BATCH_DAY"
+
+      - name: Tagespaket als GitHub Backup sichern
         uses: actions/upload-artifact@v4
+
         with:
           name: MW4-${{ steps.day.outputs.value }}-${{ github.run_id }}-${{ github.run_attempt }}
+
           path: mw4/output/MW4_${{ steps.day.outputs.value }}.zip
+
           if-no-files-found: error
+
           retention-days: 30
 
-      - name: Optional in separaten Drive-Ordner laden
+      - name: Zwei Videos in MW4 Drive Ordner laden
         env:
           BATCH_DAY: ${{ steps.day.outputs.value }}
-        run: python mw4/bot.py upload --day "$BATCH_DAY"
+
+        run: |
+          python mw4/bot.py \
+            upload \
+            --day "$BATCH_DAY"
 
       - name: Ergebnis anzeigen
         if: success()
+
         run: |
           python - <<'PY'
           import os
 
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
+          text = """
+          ## MW4 Tagesproduktion fertig
+
+          - 2 TikTok-Videos gerendert
+          - weiße Hook-Schrift auf rotem Hintergrund
+          - Hook maximal zwei Zeilen
+          - deutsche Auto-Untertitel
+          - Untertitel im TikTok-Safe-Bereich
+          - Originalaudio bleibt erhalten
+          - Videos + Caption + Metadata in Google Drive
+          - GitHub ZIP nur als Backup
+          - kein automatisches TikTok-Posting
+          - keine automatische Content-Rewards-Submission
+
+          Vor dem Posting jedes Video einmal kurz vollständig ansehen.
+          """
+
+          with open(
+              os.environ[
+                  "GITHUB_STEP_SUMMARY"
+              ],
+              "a",
+          ) as stream:
               stream.write(
-                  "Zwei Entwürfe erstellt. "
-                  "Vor jedem Posting VOR_DEM_POSTEN.txt prüfen.\n\n"
-              )
-              stream.write(
-                  "Nichts wurde auf TikTok veröffentlicht "
-                  "oder bei Content Rewards eingereicht.\n"
+                  text
               )
           PY
