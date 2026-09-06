@@ -1,4 +1,77 @@
 {
   "schema": 1,
-  "days": {}
+  "days": {
+    "2026-09-06": [
+      {
+        "source_id": "1ikTpY_xctEHa9iSuFakTvTEVkIOAVfiv",
+        "sha256": "7bc4c6739d136b579849755e592fcd185367152cb0674b56d4a3e193b5d1546e",
+        "duration": 26.983,
+        "fingerprints": [
+          "ce4c0406a6636368",
+          "d131e1e9f96968e9",
+          "899496487c7278ee",
+          "b137c7ce643b3a6c",
+          "a7b7730d876373fb",
+          "c9cbeb63c038bc7c",
+          "ac8c4133ba79b8fd",
+          "ceccc455d17d3939",
+          "d9d9c3e1e1616062",
+          "dcd8e8e3e06172e1",
+          "cece5cdd9a9a3b8d",
+          "ce6923b3cb6b2b59",
+          "3c1c1c5911393131",
+          "cece5e797e66beef",
+          "45e5e14200717063",
+          "44a5a780c3616cec",
+          "e48171612170766c",
+          "9b9b6b697b696173",
+          "fcfcdcf8e97dbde7",
+          "d1c96d652d193ded",
+          "672786135b5b6263",
+          "198b8590b1337263",
+          "d1af87c0cc346666",
+          "939340b14955e869",
+          "393f7d757c6cefef",
+          "eff9787e6a73b6b3",
+          "858081a786777351"
+        ],
+        "topic": "Pistole",
+        "hook": "Nur 'ne Pistole - schau genau hin",
+        "creator": "@averagejoewo",
+        "variant": "A",
+        "slot": "17:30"
+      },
+      {
+        "source_id": "1Pbm7v5qE-SyDA5e9aeL7mH61ViW2JfAU",
+        "sha256": "dc7e51e1f07655935177fd5c7e77ca217fb995eee79267bd41b62a00245a1629",
+        "duration": 18.535,
+        "fingerprints": [
+          "c3e52999c931b1a5",
+          "d3456b19c93131b5",
+          "9d9d9f1e2f4e4e4e",
+          "f3e56909c931a1e5",
+          "ec899bd2327353db",
+          "9b9f9b53af3dbfdf",
+          "93e4e5cbf66ebded",
+          "97a4accecc75f5ef",
+          "97a48dcacc75f5ef",
+          "9ed893939bb4bc7d",
+          "e7e66e4cd272b2f3",
+          "969b1b1632323696",
+          "33960c8c9879b1f1",
+          "2f0dcb737a7e3e7c",
+          "0ddfdecacdcfefcf",
+          "289996c6874749cf",
+          "60c9c2c6c666a6ea",
+          "ccc4ccc0e226a2b3",
+          "0100000020109093"
+        ],
+        "topic": "Sniper",
+        "hook": "Was fällt dir an dieser Szene auf?",
+        "creator": "@averagejoewo",
+        "variant": "B",
+        "slot": "20:30"
+      }
+    ]
+  }
 }
