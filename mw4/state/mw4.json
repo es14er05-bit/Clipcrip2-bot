@@ -160,6 +160,69 @@
         "variant": "A",
         "slot": "20:30"
       }
+    ],
+    "2026-09-08": [
+      {
+        "source_id": "11T2_z_-6l6CNJ83OFaEvO4HSU18OmIII",
+        "sha256": "570e3264c01b8ce925a3c49c8cd2e5d3d8a3ea50481ffc0a5bed89e783edff1b",
+        "duration": 18.86885,
+        "fingerprints": [
+          "9f93333333179793",
+          "8d838387871393d3",
+          "999959797971e1e9",
+          "d3c6cfefff3cb3e3",
+          "9397dbfd7e79786c",
+          "2c9c98191951605c",
+          "939eccc8c8696064",
+          "b49c8bb6bc36a3a3",
+          "292dabb83c1a9890",
+          "2d30f4d8d81c9990",
+          "ad6c078c80008094",
+          "d8eea6aea2129094",
+          "d8eea6aea2339094",
+          "0100400020109091",
+          "0100400020109090",
+          "b183c6e5c051e0e3",
+          "b3ebcac88830b0b3",
+          "b181cbc88c08b0b0",
+          "b3834ac4881890d1"
+        ],
+        "topic": "Spielzug",
+        "hook": "Wie lange hält er dieses 1v3?",
+        "creator": "@averagejoewo",
+        "variant": "A",
+        "slot": "17:30"
+      },
+      {
+        "source_id": "1eRzChBSJSTH_uGhm9QpkOrQsaRRYo8Av",
+        "sha256": "90ce978510709bf15b477fc5d0d30c6fb2a4ce181a529a4974df049ff6129fd1",
+        "duration": 17.884,
+        "fingerprints": [
+          "3b9396e4f0686cec",
+          "98c88198c96168ee",
+          "b3b2b68e8e464e4e",
+          "9df9f0d8f87878fc",
+          "0d8f4e7e7e6effef",
+          "4c454f034361696c",
+          "23a74a5a4d256069",
+          "8c8c88908c4c70f0",
+          "bab2f29c9c9cf0e2",
+          "9a925660616168e2",
+          "8e96d2d29232b2d2",
+          "b6f6fecec8d4f6de",
+          "b79f8e36945666e2",
+          "32228083b3736270",
+          "113f2e2daca0f262",
+          "f0f030b09c3cb09a",
+          "7a16dacce83db8da",
+          "ccfcfcfcd474bed6"
+        ],
+        "topic": "Spielzug",
+        "hook": "Pistole und Messer gegen vier Gegner.",
+        "creator": "@averagejoewo",
+        "variant": "B",
+        "slot": "20:30"
+      }
     ]
   }
 }
