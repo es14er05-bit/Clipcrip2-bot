@@ -223,6 +223,78 @@
         "variant": "B",
         "slot": "20:30"
       }
+    ],
+    "2026-09-09": [
+      {
+        "source_id": "1B8QHC8-DS25Z4Tj5U0LhlzSRmi1KQAou",
+        "sha256": "ca715d9e110f47ceac24345c18b41833b10b8d515d2421a32b85c532317e53cb",
+        "duration": 30.013,
+        "fingerprints": [
+          "4e2e8e89c34e6e4c",
+          "27ac8889896b6d6e",
+          "262e8989c94f6c6c",
+          "6e0b1b3f2c2f3333",
+          "a68e899b8b4e4c4c",
+          "c3c68d8d9d4e4a4c",
+          "d6868c8c9c5e4c4c",
+          "d7c548ca8c4e6f5f",
+          "4819161082666769",
+          "c7c7cfd3c262a3c7",
+          "cac0c3c6d2666464",
+          "96ceccbb3b3cbfdf",
+          "ceaf37263c34b4b7",
+          "975545616461b072",
+          "69e3f8bcb6787dda",
+          "ceac5ccc4f4d686c",
+          "cccd8ca9e9e96def",
+          "5c8e8604847471d9",
+          "e27372634e6b6a6b",
+          "ce8cc8e1c465b3b3",
+          "80a0a0a383517158",
+          "1614080010086a49",
+          "880981414747a123",
+          "939a32d25a5b9a9b",
+          "4366ed6bef0793d3",
+          "5b7b7dd8d80a8391",
+          "d958f0d8f8189890",
+          "0d1813b535339796",
+          "48aea2a63f139796",
+          "48aea2a63f139796"
+        ],
+        "topic": "Spielzug",
+        "hook": "Mit der PPSH gegen vier Gegner.",
+        "creator": "@averagejoewo",
+        "variant": "B",
+        "slot": "17:30"
+      },
+      {
+        "source_id": "1_gpXpqmyqns5gGvSQ0rGP5Ip1dCxB7qP",
+        "sha256": "407aa2cb0dcfd0f60cccff985892b7cf24d7713e9175a2dc8f18b8fec1716c6a",
+        "duration": 15.8158,
+        "fingerprints": [
+          "63632727a3333259",
+          "1393c382846767ea",
+          "ae8d4d2d9dccb99d",
+          "eeae9eccec6ebff9",
+          "decfeeeefc5afbdb",
+          "be18313c187436e7",
+          "cccfc4d6565fb9e9",
+          "dfb99bbe8e6d64e6",
+          "df8ececcd452faed",
+          "278f8f1d99599b9b",
+          "f8d878b9575ebafc",
+          "cce465f3d277a858",
+          "91d26dedd55db9fc",
+          "7112206061717171",
+          "d8884c45cd696de5",
+          "ac9c676e7c7cb39e"
+        ],
+        "topic": "Movement",
+        "hook": "Dieses Shotgun-Movement ist so clean.",
+        "creator": "@averagejoewo",
+        "variant": "A",
+        "slot": "20:30"
+      }
     ]
   }
 }
